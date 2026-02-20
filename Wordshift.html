@@ -5343,8 +5343,16 @@ function runNormalizeWordReview(raw){
   raw=raw||{};
   var approved={};
   var rejected={};
-  function addWords(list, into){
-    if(!Array.isArray(list)) return;
+  function addWords(input, into){
+    if(!input) return;
+    var list=[];
+    if(Array.isArray(input)){
+      list=input;
+    }else if(typeof input==='object'){
+      list=Object.keys(input).filter(function(k){ return !!input[k]; });
+    }else{
+      return;
+    }
     for(var i=0;i<list.length;i++){
       var w=lettersOnlyUpper(list[i]||'');
       if(!/^[A-Z]{4,8}$/.test(w)) continue;
@@ -5535,7 +5543,11 @@ async function runSaveWordReviewToRemote(opts){
       try{ parsed=JSON.parse(text); }catch(_){ }
     }
 
-    runWordReviewFile=runNormalizeWordReview(parsed);
+    var mergedSaved=runMergeWordReview(parsed, payload);
+    runWordReviewFile=runNormalizeWordReview({
+      approved:Object.keys(mergedSaved.approved),
+      rejected:Object.keys(mergedSaved.rejected)
+    });
     runWordReviewLocal=runNormalizeWordReview(null);
     runWordReviewSave();
     runRebuildWordReview();
