@@ -6959,7 +6959,7 @@ function runFilterReviewedCampaignWords(pool){
 }
 function runClusterWordLenRange(cluster){
   var c=Math.max(1, safeInt(cluster,1));
-  if(c<=1) return {min:5,max:6};
+  if(c<=1) return {min:4,max:4};
   if(c===2) return {min:5,max:7};
   return {min:4,max:8};
 }
@@ -7011,6 +7011,64 @@ function runArchetypeWeight(arch, cluster, isBoss){
   if(tier===1) return isBoss ? 0.6 : 1;
   if(tier===2) return isBoss ? 2.5 : 3;
   return isBoss ? 7 : 8;
+}
+function runNegativeMutatorKeys(mut){
+  if(!mut) return [];
+  var keys=[];
+  function add(name){
+    if(mut[name]) keys.push(name);
+  }
+  add('blindStart');
+  add('echo');
+  add('vowelsOnly');
+  add('mirror');
+  add('staticTile');
+  add('drift');
+  add('fog');
+  add('budget');
+  add('doubleVision');
+  add('bloodMirage');
+  add('randomKeyboard');
+  add('noisyArrows');
+  add('hotPotato');
+  add('phantomLetter');
+  add('copycat');
+  add('minDistance');
+  add('countdown');
+  return keys;
+}
+function runCleanupMutatorFields(mut){
+  if(!mut) return;
+  if(!mut.countdown){
+    delete mut.countdownAutoStart;
+    delete mut.countdownSec;
+    delete mut.countdownKeyCenti;
+  }
+  if(!mut.copycat){ delete mut.copycatMin; }
+  if(!mut.minDistance){ delete mut.minDistanceVal; }
+  if(!mut.budget){ delete mut.budgetPoints; }
+  if(!mut.lifeline){ delete mut.lifelineCount; }
+}
+function runApplyTutorialMutatorCap(mut, cluster, packStage, nodeType){
+  if(!mut) return;
+  var c=Math.max(1, safeInt(cluster,1));
+  var stage=Math.max(1, safeInt(packStage,1));
+  var type=String(nodeType || 'pack').toLowerCase();
+  if(c!==1) return;
+  if(stage>3) return;
+  if(type==='elite' || type==='boss') return;
+  var negatives=runNegativeMutatorKeys(mut);
+  if(negatives.length<=1){
+    runCleanupMutatorFields(mut);
+    return;
+  }
+  var keep=negatives[(runRandom()*negatives.length)|0];
+  for(var i=0;i<negatives.length;i++){
+    var key=negatives[i];
+    if(key===keep) continue;
+    delete mut[key];
+  }
+  runCleanupMutatorFields(mut);
 }
 function runCountdownVarianceSpan(cluster, nodeType){
   var c=Math.max(1, safeInt(cluster,1));
@@ -7683,6 +7741,7 @@ function runRebalanceNodeRewards(){
 function runCreatePackNode(arch, packStage, slot, isBoss, opts){
   opts=opts || {};
   var elite=!!opts.elite && !isBoss;
+  var nodeType=isBoss?'boss':(elite?'elite':'pack');
   var lenRange=runClusterWordLenRange(runCampaign.cluster);
   var baseLen=clamp(safeInt(arch.lengthBase,5), lenRange.min, lenRange.max);
   var len=clamp(baseLen + (((runRandom()*3)|0)-1), lenRange.min, lenRange.max);
@@ -7724,6 +7783,7 @@ function runCreatePackNode(arch, packStage, slot, isBoss, opts){
     if(runCampaign.cluster>=2) mut.hotPotato=true;
     if(runCampaign.cluster>=3) mut.phantomLetter=true;
   }
+  runApplyTutorialMutatorCap(mut, runCampaign.cluster, packStage, nodeType);
   var words=[];
   var baseDiff=isBoss?'hard':(elite?'hard':arch.difficulty);
   var needYellow=runRequiredStarterYellowsForMutator(mut, len);
@@ -7746,7 +7806,6 @@ function runCreatePackNode(arch, packStage, slot, isBoss, opts){
       ? 'Elite node. Extra mutators, bigger payout, and no safety net.'
       : arch.intro);
   var displayDiff=isBoss?'insane':(elite?'elite':(arch.displayDifficulty||arch.difficulty));
-  var nodeType=isBoss?'boss':(elite?'elite':'pack');
   var reward=runNodeRewardValue(runCampaign.cluster, packStage, nodeType, displayDiff, mut, len, slot);
   var maxGuesses=(arch.maxGuesses||6);
   if(elite) maxGuesses=Math.max(4, maxGuesses-1);
