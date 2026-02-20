@@ -6768,6 +6768,8 @@ async function runSaveWordReviewToFile(opts){
 async function runSaveWordReviewToRemote(opts){
   opts=opts || {};
   var url=String(runWordReviewWriteUrl||'').trim();
+  var stagedMetaUrl=String((runWordReviewFileMeta && runWordReviewFileMeta.url) || '').trim();
+  var stagedSnapshot=(stagedMetaUrl && !runWordReviewApiUrl(stagedMetaUrl)) ? runWordReviewMergedSnapshot() : null;
   if(!runWordReviewRemoteWritable()){
     if(!opts.silent) toast('Cloud API not configured. Expected '+runWordReviewWriteUrl);
     return false;
@@ -6796,7 +6798,7 @@ async function runSaveWordReviewToRemote(opts){
     return false;
   }
   try{
-    var snapshot=runWordReviewMergedSnapshot();
+    var snapshot=stagedSnapshot || runWordReviewMergedSnapshot();
     var payload={
       approved:Object.keys(snapshot.approved).sort(),
       rejected:Object.keys(snapshot.rejected).sort()
