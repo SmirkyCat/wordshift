@@ -901,11 +901,17 @@ body.campaign-intro #kbd .key{
   100%{filter:brightness(1)}
 }
 .tile.dir::after{
-  content:attr(data-dir);position:absolute;right:6px;bottom:4px;font-size:12px;
-  color:#000;opacity:.95;text-shadow:0 1px 0 rgba(255,255,255,.4);
+  content:attr(data-dir);position:absolute;right:5px;bottom:3px;
+  min-width:18px;padding:1px 4px;border-radius:8px;
+  font-size:13px;line-height:1.1;font-weight:900;letter-spacing:.02em;
+  color:#fff;opacity:1;
+  background:rgba(0,0,0,.3);
+  text-shadow:0 1px 2px rgba(0,0,0,.75),0 0 1px rgba(0,0,0,.6);
+  box-shadow:0 1px 3px rgba(0,0,0,.35);
 }
 .tile.grayed.dir::after{
-  color:#fff;opacity:.9;text-shadow:0 2px 6px rgba(0,0,0,.5)
+  color:#fff;opacity:1;background:rgba(0,0,0,.42);
+  text-shadow:0 2px 6px rgba(0,0,0,.55)
 }
 .tile, .tile::after { backface-visibility:hidden; transform-style:preserve-3d }
 @keyframes flip{0%{transform:rotateX(0)}49%{transform:rotateX(90deg)}51%{transform:rotateX(90deg)}100%{transform:rotateX(0)}}
@@ -1155,6 +1161,79 @@ button.primary.disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.1)}
 #wordReviewModal .card{
   width:min(96svw,840px);
 }
+.word-review-search{
+  margin:8px 0 8px;
+  padding:10px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.16);
+  background:rgba(0,0,0,.2);
+}
+.word-review-search-toolbar{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto auto;
+  gap:8px;
+  align-items:center;
+}
+.word-review-search-toolbar input,
+.word-review-search-toolbar select{
+  min-width:0;
+  width:100%;
+  padding:9px 10px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.18);
+  background:var(--bg2);
+  color:var(--fg);
+  font:inherit;
+}
+.word-review-search-toolbar .secondary{
+  min-width:86px;
+  padding:9px 12px;
+}
+.word-review-search-note{
+  margin:7px 1px 0;
+  color:var(--muted);
+  font-size:.78rem;
+  letter-spacing:.05em;
+}
+.word-review-search-results{
+  margin-top:8px;
+  max-height:min(34svh,320px);
+  overflow:auto;
+  display:grid;
+  gap:8px;
+  padding-right:2px;
+}
+.word-review-search-row .word-review-word{
+  font-size:clamp(.95rem,4vw,1.2rem);
+}
+.word-review-status-pill{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin-left:6px;
+  padding:2px 8px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.18);
+  font-size:.64rem;
+  font-weight:900;
+  letter-spacing:.11em;
+  text-transform:uppercase;
+}
+.word-review-status-pill.approved{
+  color:#d8ffe2;
+  background:rgba(65,158,92,.28);
+  border-color:rgba(130,225,156,.45);
+}
+.word-review-status-pill.rejected{
+  color:#ffd8d8;
+  background:rgba(160,70,70,.28);
+  border-color:rgba(255,154,154,.5);
+}
+.word-review-status-pill.pending{
+  color:#fff3cf;
+  background:rgba(142,118,48,.26);
+  border-color:rgba(232,205,131,.45);
+}
 .word-review-list{
   margin:10px 0 8px;
   display:grid;
@@ -1351,6 +1430,8 @@ button.primary.disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.1)}
 @media (max-width:760px){
   .shop-columns{grid-template-columns:1fr}
   .shop-free-list{grid-template-columns:1fr}
+  .word-review-search-toolbar{grid-template-columns:1fr 1fr}
+  .word-review-search-toolbar .secondary{grid-column:1 / -1}
 }
 </style>
 </head>
@@ -1705,7 +1786,21 @@ button.primary.disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.1)}
   <div class="card">
     <h2>Campaign Word Review</h2>
     <p class="intro-desc">Approve or reject random campaign candidates. Load from URL, then bind a JSON file to write decisions back to disk.</p>
-        <div class="word-review-list" id="wrList"></div>
+    <div class="word-review-search">
+      <div class="word-review-search-toolbar">
+        <input id="wrSearchInput" type="text" placeholder="Search campaign words (A-Z)">
+        <select id="wrSearchStatus">
+          <option value="any">Any status</option>
+          <option value="pending">Pending</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+        </select>
+        <button class="secondary" id="wrSearchClear" type="button">Clear</button>
+      </div>
+      <div class="word-review-search-note">Search existing campaign words and set each to approved, rejected, or pending.</div>
+      <div class="word-review-search-results" id="wrSearchResults"></div>
+    </div>
+    <div class="word-review-list" id="wrList"></div>
     <div class="word-review-stats" id="wrStats"></div>
 
     <div class="actions">
@@ -3597,7 +3692,7 @@ function applyDrift(){
       hint.grayed=pol.grayed; hint.showArrow=pol.showArrow;
       hint.showNumber=(effectiveDifficulty(state.difficulty)==='easy' && dist<=3) || keepLife;
       if(mutOn('noisyArrows') && dist>3 && hint.showArrow && Math.random()<0.33){
-        hint.noisyArrow=(Math.random()<0.5)?'^':'v';
+        hint.noisyArrow=(Math.random()<0.5)?'\u25B2':'\u25BC';
       }else{
         delete hint.noisyArrow;
       }
@@ -3911,7 +4006,7 @@ function applyTileVisual(tile, letter, hint, pol){
     tile.classList.add('grayed');
     if(pol.showArrow || showNumber){
       var signG = (dir>0)?'+':'-';
-      var arrowG = arrowOverride || ((dir>0)?'>':'<');
+      var arrowG = arrowOverride || ((dir>0)?'\u25B6':'\u25C0');
       var labelG = showNumber ? (arrowG + signG + dist) : arrowG;
       if(!pol.showArrow && showNumber){ labelG = signG + dist; }
       tile.setAttribute('data-dir', labelG);
@@ -3931,7 +4026,7 @@ function applyTileVisual(tile, letter, hint, pol){
   }
   if(pol.showArrow || showNumber){
     var sign = (dir>0)?'+':'-';
-    var arrow = arrowOverride || ((dir>0)?'>':'<');
+    var arrow = arrowOverride || ((dir>0)?'\u25B6':'\u25C0');
     var label = showNumber ? (arrow + sign + dist) : arrow;
     if(!pol.showArrow && showNumber){ label = sign + dist; }
     tile.setAttribute('data-dir', label);
@@ -4095,7 +4190,7 @@ function submitRow(allowAny, opts){
     if(phantomCol===i){ hint.hidden=true; }
     if(wildcardIdx===i){ hint.wildcard=true; hint.wildcardWord=wildcardWord; }
     if(noisy && dist>3 && hint.showArrow && Math.random()<0.33){
-      hint.noisyArrow = (Math.random()<0.5)?'^':'v';
+      hint.noisyArrow = (Math.random()<0.5)?'\u25B2':'\u25BC';
     }
     rawHints[i]=hint;
     var storeCol = mirrorRow ? (guess.length-1-i) : i;
@@ -4827,6 +4922,7 @@ function runLoadWordReviewFromFile(opts){
       runWordReviewFile=runNormalizeWordReview(parsed);
       runWordReviewFileMeta={url:url,loaded:true,lastError:''};
       runRebuildWordReview();
+      runInvalidateWordReviewSearchIndex();
       if(!opts.silent) toast('Campaign word file loaded.');
       var refreshed=runRefreshFrontierWordsForReview();
       if(refreshed>0 && campaignMenuScreen && campaignMenuScreen.classList.contains('active')){
@@ -4923,6 +5019,146 @@ function runWordReviewStats(opts){
   out.localRejectedEntries=Object.keys(runWordReviewLocal.rejected).length;
   return out;
 }
+function runInvalidateWordReviewSearchIndex(){
+  runWordReviewSearchDirty=true;
+}
+function runBuildWordReviewSearchIndex(){
+  var map={};
+  function addWord(word, source){
+    var w=lettersOnlyUpper(word||'');
+    if(!/^[A-Z]{4,8}$/.test(w)) return;
+    if(!runReadableWord(w)) return;
+    if(!map[w]){
+      map[w]={word:w,len:w.length,source:source||'unknown'};
+      return;
+    }
+    if((!map[w].source || map[w].source==='unknown') && source){
+      map[w].source=source;
+    }
+  }
+  var lens=runCampaignReviewLengths();
+  for(var i=0;i<lens.length;i++){
+    var len=lens[i];
+    var info=runWordPool(len, {preferSeed:false, ignoreReview:true});
+    var pool=info.pool || [];
+    var source=String(info.source||'unknown');
+    for(var j=0;j<pool.length;j++){
+      addWord(pool[j], source);
+    }
+  }
+  Object.keys(runWordReviewFile.approved).forEach(function(w){ addWord(w,'file'); });
+  Object.keys(runWordReviewFile.rejected).forEach(function(w){ addWord(w,'file'); });
+  Object.keys(runWordReviewLocal.approved).forEach(function(w){ addWord(w,'local'); });
+  Object.keys(runWordReviewLocal.rejected).forEach(function(w){ addWord(w,'local'); });
+  Object.keys(runWordReview.approved).forEach(function(w){ addWord(w,'review'); });
+  Object.keys(runWordReview.rejected).forEach(function(w){ addWord(w,'review'); });
+
+  runWordReviewSearchIndex=Object.keys(map).sort().map(function(w){ return map[w]; });
+  runWordReviewSearchBuilt=true;
+  runWordReviewSearchDirty=false;
+}
+function runEnsureWordReviewSearchIndex(){
+  if(!runWordReviewSearchBuilt || runWordReviewSearchDirty){
+    runBuildWordReviewSearchIndex();
+  }
+  return runWordReviewSearchIndex;
+}
+function runWordReviewSearchResults(query, statusFilter, limit){
+  query=lettersOnlyUpper(query||'');
+  statusFilter=String(statusFilter||'any').toLowerCase();
+  limit=clamp(safeInt(limit,60),1,300);
+  if(!query) return [];
+  var list=runEnsureWordReviewSearchIndex();
+  var out=[];
+  var pass=0;
+  while(pass<2 && out.length<limit){
+    var prefix=(pass===0);
+    for(var i=0;i<list.length && out.length<limit;i++){
+      var entry=list[i];
+      var w=entry.word;
+      var at=w.indexOf(query);
+      if(at<0) continue;
+      if(prefix && at!==0) continue;
+      if(!prefix && at===0) continue;
+      var status=runWordReviewStatus(w);
+      if(statusFilter!=='any' && status!==statusFilter) continue;
+      out.push({
+        word:w,
+        len:entry.len || w.length,
+        source:String(entry.source||'unknown'),
+        status:status
+      });
+    }
+    pass++;
+  }
+  return out;
+}
+function runRenderWordReviewSearch(){
+  if(!wrSearchResultsEl) return;
+  if(!runWordReviewAuthed){
+    wrSearchResultsEl.innerHTML='<div class="word-review-empty">Authenticate in Options first.</div>';
+    return;
+  }
+  if(runWordReviewLoading){
+    wrSearchResultsEl.innerHTML='<div class="word-review-empty">Loading campaign word file...</div>';
+    return;
+  }
+  var query='';
+  if(wrSearchInput){
+    query=lettersOnlyUpper(wrSearchInput.value||'');
+    if(wrSearchInput.value!==query){ wrSearchInput.value=query; }
+  }
+  var statusFilter=wrSearchStatus ? String(wrSearchStatus.value||'any').toLowerCase() : 'any';
+  if(!query){
+    var snap=runWordReviewMergedSnapshot();
+    var aCount=Object.keys(snap.approved).length;
+    var rCount=Object.keys(snap.rejected).length;
+    wrSearchResultsEl.innerHTML='<div class="word-review-empty">Type letters to search campaign words. Current reviewed totals: approved '+aCount+', rejected '+rCount+'.</div>';
+    return;
+  }
+  var rows=runWordReviewSearchResults(query, statusFilter, 60);
+  if(!rows.length){
+    wrSearchResultsEl.innerHTML='<div class="word-review-empty">No matches for '+runEscHtml(query)+'.</div>';
+    return;
+  }
+  wrSearchResultsEl.innerHTML=rows.map(function(row){
+    var word=row.word;
+    var len=safeInt(row.len, word.length);
+    var source=runEscHtml(String(row.source||'unknown').toUpperCase());
+    var status=row.status||'pending';
+    var statusLabel=status.toUpperCase();
+    var approveDisabled=status==='approved' ? ' disabled' : '';
+    var rejectDisabled=status==='rejected' ? ' disabled' : '';
+    var pendingDisabled=status==='pending' ? ' disabled' : '';
+    return '<div class="word-review-row word-review-search-row">'
+      + '<div class="word-main">'
+      + '<div class="word-review-word">'+word+'</div>'
+      + '<div class="word-review-meta">Length '+len+' | Source '+source+' | <span class="word-review-status-pill '+status+'">'+statusLabel+'</span></div>'
+      + '</div>'
+      + '<div class="word-review-actions">'
+      + '<button class="primary" type="button" data-wr-search-action="approve" data-word="'+word+'"'+approveDisabled+'>Approve</button>'
+      + '<button class="secondary danger" type="button" data-wr-search-action="reject" data-word="'+word+'"'+rejectDisabled+'>Reject</button>'
+      + '<button class="secondary" type="button" data-wr-search-action="pending" data-word="'+word+'"'+pendingDisabled+'>Pending</button>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+function runWordReviewCanMutate(notify){
+  if(!runWordReviewAuthed){
+    if(notify) toast('Authenticate in Options before editing campaign words.');
+    return false;
+  }
+  if(runWordReviewLoading){
+    if(notify) toast('Word review file is still loading.');
+    return false;
+  }
+  var expectedUrl=String(runWordReviewFileUrl||'').trim();
+  if(!runWordReviewFileMeta.loaded || runWordReviewFileMeta.url!==expectedUrl){
+    if(notify) toast('Reload file first so approvals use cloud baseline.');
+    return false;
+  }
+  return true;
+}
 function runPickWordReviewBatch(count, exclude){
   count=clamp(safeInt(count,5),1,50);
   var blocked={};
@@ -5016,7 +5252,10 @@ function runReplaceWordReviewRow(word){
   else runWordReviewBatch.splice(idx,1);
 }
 function runRenderWordReview(forceNext){
-  if(forceNext) runWordReviewBatch=[];
+  if(forceNext){
+    runWordReviewBatch=[];
+    runInvalidateWordReviewSearchIndex();
+  }
   runEnsureWordReviewBatch(5);
   var stats=runWordReviewStats();
   if(wrStatsEl){
@@ -5040,13 +5279,18 @@ function runRenderWordReview(forceNext){
       + '<span class="wr-summary">'+runEscHtml(runWordReviewSyncStateText())+'</span>'
       + '<div class="wr-lines">'+rows+'</div>';
   }
-  if(!wrListEl) return;
+  if(!wrListEl){
+    runRenderWordReviewSearch();
+    return;
+  }
   if(runWordReviewLoading){
     wrListEl.innerHTML='<div class="word-review-empty">Loading campaign word file...</div>';
+    runRenderWordReviewSearch();
     return;
   }
   if(!runWordReviewBatch.length){
     wrListEl.innerHTML='<div class="word-review-empty">All currently available campaign words are reviewed.</div>';
+    runRenderWordReviewSearch();
     return;
   }
   wrListEl.innerHTML=runWordReviewBatch.map(function(entry){
@@ -5065,6 +5309,7 @@ function runRenderWordReview(forceNext){
       + '</div>'
       + '</div>';
   }).join('');
+  runRenderWordReviewSearch();
 }
 function openWordReviewModal(){
   if(!wordReviewModal) return;
@@ -5104,29 +5349,45 @@ function closeWordReviewModal(){
   wordReviewModal.classList.remove('open');
   document.body.style.overflow='';
 }
-function runApplyWordReviewDecision(word, approved){
-  if(!runWordReviewAuthed){
-    toast('Authenticate in Options before editing campaign words.');
-    return;
-  }
+function runWordReviewSetStatus(word, status, opts){
+  opts=opts || {};
+  if(!runWordReviewCanMutate(!opts.silent)) return false;
   var w=lettersOnlyUpper(word||'');
   if(!w){
-    runRenderWordReview(true);
-    return;
+    runRenderWordReview(false);
+    return false;
+  }
+  status=String(status||'pending').toLowerCase();
+  if(status!=='approved' && status!=='rejected') status='pending';
+  var current=runWordReviewStatus(w);
+  if(current===status){
+    if(!opts.silent){
+      if(status==='pending') toast(w+' is already pending.');
+      else toast(w+' is already '+status+'.');
+    }
+    return true;
   }
   runWordReviewMutationRev++;
-  if(approved){
-    delete runWordReviewLocal.rejected[w];
+  delete runWordReviewFile.approved[w];
+  delete runWordReviewFile.rejected[w];
+  delete runWordReviewLocal.approved[w];
+  delete runWordReviewLocal.rejected[w];
+
+  if(status==='approved'){
+    runWordReviewFile.approved[w]=true;
     runWordReviewLocal.approved[w]=true;
-    toast('Approved '+w);
-  }else{
-    delete runWordReviewLocal.approved[w];
+    if(!opts.silent) toast('Approved '+w);
+  }else if(status==='rejected'){
+    runWordReviewFile.rejected[w]=true;
     runWordReviewLocal.rejected[w]=true;
-    toast('Rejected '+w);
+    if(!opts.silent) toast('Rejected '+w);
+  }else if(!opts.silent){
+    toast('Set '+w+' to pending');
   }
   runWordReviewSave();
   runRebuildWordReview();
-  runReplaceWordReviewRow(w);
+  runInvalidateWordReviewSearchIndex();
+  if(!opts.skipBatchReplace) runReplaceWordReviewRow(w);
   var refreshed=runRefreshFrontierWordsForReview();
   if(refreshed>0 && campaignMenuScreen && campaignMenuScreen.classList.contains('active')){
     buildCampaignMenu();
@@ -5137,6 +5398,13 @@ function runApplyWordReviewDecision(word, approved){
     if(ok) return;
     runSaveWordReviewToRemote({silent:true});
   });
+  return true;
+}
+function runApplyWordReviewDecision(word, approved){
+  return runWordReviewSetStatus(word, approved ? 'approved' : 'rejected');
+}
+function runClearWordReviewDecision(word){
+  return runWordReviewSetStatus(word, 'pending');
 }
 function runSkipWordReviewWord(word){
   if(!runWordReviewAuthed){
@@ -5280,6 +5548,10 @@ var wordReviewBtn=$('#btnWordReview');
 var wordReviewModal=$('#wordReviewModal');
 var wrListEl=$('#wrList');
 var wrStatsEl=$('#wrStats');
+var wrSearchInput=$('#wrSearchInput');
+var wrSearchStatus=$('#wrSearchStatus');
+var wrSearchClearBtn=$('#wrSearchClear');
+var wrSearchResultsEl=$('#wrSearchResults');
 var wrCloseBtn=$('#wrClose');
 var wrReloadBtn=$('#wrReload');
 var wrBindFileBtn=$('#wrBindFile');
@@ -5293,6 +5565,9 @@ var optWordReviewReloadRow=$('#optWordReviewReloadRow');
 var runWordReviewBatch=[];
 var runWordReviewLoading=false;
 var runWordReviewNeedsInitialLoad=true;
+var runWordReviewSearchIndex=[];
+var runWordReviewSearchBuilt=false;
+var runWordReviewSearchDirty=true;
 var runWordReviewFileHandle=null;
 var runWordReviewFileSync={lastOk:0,lastError:'',lastTarget:''};
 var started=false;
@@ -5733,6 +6008,7 @@ async function runSaveWordReviewToFile(opts){
     runWordReviewLocal=runNormalizeWordReview(null);
     runWordReviewSave();
     runRebuildWordReview();
+    runInvalidateWordReviewSearchIndex();
 
     runWordReviewFileSync.lastTarget=runWordReviewFileHandle.name || 'bound file';
     runWordReviewFileSync.lastOk=Date.now();
@@ -5819,6 +6095,7 @@ async function runSaveWordReviewToRemote(opts){
     runWordReviewLocal=runNormalizeWordReview(null);
     runWordReviewSave();
     runRebuildWordReview();
+    runInvalidateWordReviewSearchIndex();
 
     runWordReviewFileSync.lastTarget='cloud '+url;
     runWordReviewFileSync.lastOk=Date.now();
@@ -5864,6 +6141,18 @@ function runUpdateWordReviewControls(){
   if(wrReloadBtn){
     wrReloadBtn.disabled=!authed;
     wrReloadBtn.title = authed ? '' : 'Authenticate in Options first.';
+  }
+  if(wrSearchInput){
+    wrSearchInput.disabled=!authed;
+    wrSearchInput.title = authed ? '' : 'Authenticate in Options first.';
+  }
+  if(wrSearchStatus){
+    wrSearchStatus.disabled=!authed;
+    wrSearchStatus.title = authed ? '' : 'Authenticate in Options first.';
+  }
+  if(wrSearchClearBtn){
+    wrSearchClearBtn.disabled=!authed;
+    wrSearchClearBtn.title = authed ? '' : 'Authenticate in Options first.';
   }
   runUpdatePrivateAccessUI();
 }
@@ -8214,22 +8503,7 @@ if(wrListEl){
   wrListEl.addEventListener('click', function(e){
     var btn=(e.target.closest && e.target.closest('button[data-wr-action]')) ? e.target.closest('button[data-wr-action]') : null;
     if(!btn) return;
-
-    if(!runWordReviewAuthed){
-      toast('Authenticate in Options before editing campaign words.');
-      return;
-    }
-
-    if(runWordReviewLoading){
-      toast('Word review file is still loading.');
-      return;
-    }
-
-    var expectedUrl=String(runWordReviewFileUrl||'').trim();
-    if(!runWordReviewFileMeta.loaded || runWordReviewFileMeta.url!==expectedUrl){
-      toast('Reload file first so approvals use cloud baseline.');
-      return;
-    }
+    if(!runWordReviewCanMutate(true)) return;
 
     var action=btn.getAttribute('data-wr-action');
     var word=lettersOnlyUpper(btn.getAttribute('data-word') || '');
@@ -8237,6 +8511,39 @@ if(wrListEl){
     if(action==='approve') runApplyWordReviewDecision(word, true);
     else if(action==='reject') runApplyWordReviewDecision(word, false);
     else if(action==='skip') runSkipWordReviewWord(word);
+  });
+}
+if(wrSearchInput){
+  wrSearchInput.addEventListener('input', function(){
+    var cleaned=lettersOnlyUpper(wrSearchInput.value||'');
+    if(wrSearchInput.value!==cleaned) wrSearchInput.value=cleaned;
+    runRenderWordReviewSearch();
+  });
+}
+if(wrSearchStatus){
+  wrSearchStatus.addEventListener('change', function(){
+    runRenderWordReviewSearch();
+  });
+}
+if(wrSearchClearBtn){
+  wrSearchClearBtn.addEventListener('click', function(){
+    if(wrSearchInput) wrSearchInput.value='';
+    if(wrSearchStatus) wrSearchStatus.value='any';
+    runRenderWordReviewSearch();
+    if(wrSearchInput) wrSearchInput.focus();
+  });
+}
+if(wrSearchResultsEl){
+  wrSearchResultsEl.addEventListener('click', function(e){
+    var btn=(e.target.closest && e.target.closest('button[data-wr-search-action]')) ? e.target.closest('button[data-wr-search-action]') : null;
+    if(!btn) return;
+    if(!runWordReviewCanMutate(true)) return;
+    var action=String(btn.getAttribute('data-wr-search-action')||'').toLowerCase();
+    var word=lettersOnlyUpper(btn.getAttribute('data-word') || '');
+    if(!word) return;
+    if(action==='approve') runApplyWordReviewDecision(word, true);
+    else if(action==='reject') runApplyWordReviewDecision(word, false);
+    else if(action==='pending') runClearWordReviewDecision(word);
   });
 }
 if(wrBindFileBtn){ wrBindFileBtn.addEventListener('click', function(){ runBindWordReviewFile(); }); }
