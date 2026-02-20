@@ -1,18 +1,28 @@
 'use strict';
 
 const KEY = 'campaign_words';
-const VERSION = '2026-02-20-auth1';
+const VERSION = '2026-02-20-rate1';
+const RATE_LIMIT_WINDOW_MS = Math.max(1000, Number.parseInt(process.env.WORD_REVIEW_RATE_WINDOW_MS || '10000', 10) || 10000);
+const RATE_LIMIT_MAX_REQUESTS = Math.max(5, Number.parseInt(process.env.WORD_REVIEW_RATE_MAX_REQUESTS || '25', 10) || 25);
+const RATE_LIMIT_BASE_COOLDOWN_MS = Math.max(1000, Number.parseInt(process.env.WORD_REVIEW_RATE_BASE_COOLDOWN_MS || '5000', 10) || 5000);
+const RATE_LIMIT_MAX_COOLDOWN_MS = Math.max(
+  RATE_LIMIT_BASE_COOLDOWN_MS,
+  Number.parseInt(process.env.WORD_REVIEW_RATE_MAX_COOLDOWN_MS || '120000', 10) || 120000
+);
+const RATE_LIMIT_TRACK_TTL_MS = Math.max(60000, Number.parseInt(process.env.WORD_REVIEW_RATE_TRACK_TTL_MS || '900000', 10) || 900000);
+const RATE_LIMIT_STATE = new Map();
 
-function json(statusCode, data) {
+function json(statusCode, data, extraHeaders) {
+  const baseHeaders = {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Wordshift-Key, X-Admin-Key'
+  };
   return {
     statusCode,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Wordshift-Key, X-Admin-Key'
-    },
+    headers: Object.assign(baseHeaders, extraHeaders || {}),
     body: JSON.stringify(data)
   };
 }
@@ -115,6 +125,92 @@ function isAuthorized(event) {
   return !!provided && provided === expected;
 }
 
+function getClientFingerprint(event) {
+  const ipRaw = String(
+    getHeaderValue(event, 'x-nf-client-connection-ip')
+    || getHeaderValue(event, 'x-forwarded-for')
+    || getHeaderValue(event, 'client-ip')
+    || ''
+  ).split(',')[0].trim();
+  const ua = String(getHeaderValue(event, 'user-agent') || '').slice(0, 120);
+  const authState = getAuthKeyFromEvent(event) ? 'auth' : 'anon';
+  return `${ipRaw || 'unknown'}|${ua || 'ua-unknown'}|${authState}`;
+}
+
+function pruneRateLimitState(now) {
+  for (const [key, state] of RATE_LIMIT_STATE.entries()) {
+    if (!state || (now - (state.lastSeen || 0)) > RATE_LIMIT_TRACK_TTL_MS) {
+      RATE_LIMIT_STATE.delete(key);
+    }
+  }
+}
+
+function getMethodBudget(httpMethod) {
+  const m = String(httpMethod || '').toUpperCase();
+  if (m === 'POST' || m === 'PUT') {
+    return Math.max(3, Math.floor(RATE_LIMIT_MAX_REQUESTS * 0.6));
+  }
+  if (m === 'GET') {
+    return RATE_LIMIT_MAX_REQUESTS;
+  }
+  return Math.max(3, Math.floor(RATE_LIMIT_MAX_REQUESTS * 0.7));
+}
+
+function checkRateLimit(event) {
+  const method = String((event && event.httpMethod) || 'GET').toUpperCase();
+  if (method === 'OPTIONS') return { limited: false };
+
+  const now = Date.now();
+  pruneRateLimitState(now);
+
+  const clientKey = getClientFingerprint(event);
+  const state = RATE_LIMIT_STATE.get(clientKey) || {
+    hits: [],
+    strikes: 0,
+    cooldownUntil: 0,
+    lastSeen: now
+  };
+  state.lastSeen = now;
+  state.hits = (state.hits || []).filter((ts) => (now - ts) <= RATE_LIMIT_WINDOW_MS);
+
+  if (state.cooldownUntil > now) {
+    // Step-off behavior: repeated hammering extends cooldown.
+    state.strikes = Math.min((state.strikes || 0) + 1, 8);
+    const escalated = Math.min(
+      RATE_LIMIT_MAX_COOLDOWN_MS,
+      RATE_LIMIT_BASE_COOLDOWN_MS * (2 ** Math.max(0, state.strikes - 1))
+    );
+    state.cooldownUntil = Math.max(state.cooldownUntil, now + escalated);
+    RATE_LIMIT_STATE.set(clientKey, state);
+    return {
+      limited: true,
+      retryAfterMs: Math.max(1000, state.cooldownUntil - now),
+      strikes: state.strikes
+    };
+  }
+
+  state.hits.push(now);
+  const budget = getMethodBudget(method);
+  if (state.hits.length > budget) {
+    state.strikes = Math.min((state.strikes || 0) + 1, 8);
+    const cooldown = Math.min(
+      RATE_LIMIT_MAX_COOLDOWN_MS,
+      RATE_LIMIT_BASE_COOLDOWN_MS * (2 ** Math.max(0, state.strikes - 1))
+    );
+    state.cooldownUntil = now + cooldown;
+    state.hits = [];
+    RATE_LIMIT_STATE.set(clientKey, state);
+    return { limited: true, retryAfterMs: cooldown, strikes: state.strikes };
+  }
+
+  // Cool down penalties over time when request rate is calm.
+  if (state.strikes > 0 && state.hits.length <= Math.floor(budget / 3)) {
+    state.strikes = Math.max(0, state.strikes - 1);
+  }
+  RATE_LIMIT_STATE.set(clientKey, state);
+  return { limited: false };
+}
+
 async function resolveStore(context) {
   // Load SDK at runtime so initialization errors become JSON responses.
   let mod = null;
@@ -168,6 +264,21 @@ exports.handler = async (event, context) => {
   try {
     if (event.httpMethod === 'OPTIONS') {
       return json(200, { ok: true });
+    }
+
+    const rate = checkRateLimit(event);
+    if (rate.limited) {
+      const retrySeconds = Math.max(1, Math.ceil((rate.retryAfterMs || 1000) / 1000));
+      return json(429, {
+        ok: false,
+        error: 'Too many requests. Cooldown active.',
+        code: 'RATE_LIMITED',
+        retryAfterMs: retrySeconds * 1000,
+        cooldownLevel: rate.strikes || 1,
+        hint: 'Slow down and retry after the cooldown period.'
+      }, {
+        'Retry-After': String(retrySeconds)
+      });
     }
 
     const store = await resolveStore(context);

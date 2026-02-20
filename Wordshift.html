@@ -1201,6 +1201,17 @@ button.primary.disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.1)}
   font-size:.76rem;
   letter-spacing:.05em;
 }
+.word-review-api-warning{
+  margin:0 0 10px;
+  padding:10px 12px;
+  border-radius:12px;
+  border:1px solid rgba(255,128,128,.56);
+  background:rgba(120,24,24,.32);
+  color:#ffd7d7;
+  font-size:.8rem;
+  letter-spacing:.03em;
+  line-height:1.35;
+}
 .word-review-search-results{
   margin-top:8px;
   max-height:min(34svh,320px);
@@ -1805,6 +1816,7 @@ button.primary.disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.1)}
     <h2>Campaign Word Review</h2>
     <p class="intro-desc">Approve or reject random campaign candidates. Load from URL, then bind a JSON file to write decisions back to disk.</p>
     <p class="word-review-shortcuts">Shortcuts: 1-5 select row, A approve, R reject, X skip, P pending, Arrow Up/Down move, / focus search, Esc close.</p>
+    <div class="word-review-api-warning" id="wrRateLimitWarning" hidden></div>
     <div class="word-review-search">
       <div class="word-review-search-toolbar">
         <input id="wrSearchInput" type="text" placeholder="Search campaign words (A-Z)">
@@ -1911,7 +1923,7 @@ button.primary.disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.1)}
       <input id="optReviewKey" type="password" placeholder="Enter private key" autocomplete="off">
     </div>
     <div class="row">
-      <label>Campaign words access</label>
+      <label>Administrative authentication</label>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="secondary" id="optReviewAuth" type="button">Authenticate</button>
         <button class="secondary" id="optReviewLogout" type="button">Logout</button>
@@ -4898,6 +4910,11 @@ function runLoadWordReviewFromFile(opts){
   if(/\/\.netlify\/functions\/word-review(?:\?|$)/i.test(reqUrl)){
     reqUrl += (reqUrl.indexOf('?')>=0 ? '&' : '?') + '_ts=' + Date.now();
   }
+  var isRemoteApi=/\/\.netlify\/functions\/word-review(?:\?|$)/i.test(reqUrl) || /^https?:\/\/[^\s]+\/\.netlify\/functions\/word-review(?:\?|$)/i.test(reqUrl);
+  if(isRemoteApi && !runWordReviewCanCallRemote({silent:opts.silent})){
+    runWordReviewFileMeta={url:url,loaded:false,lastError:'Cloud API cooldown active'};
+    return Promise.resolve(false);
+  }
 
   // Browsers block local file reads from file:// pages via fetch.
   if(location && location.protocol==='file:' && /^file:\/\//i.test(reqUrl)){
@@ -4915,6 +4932,7 @@ function runLoadWordReviewFromFile(opts){
     return fetch(reqUrl,loadOpts).then(function(res){
       if(!res.ok){
         return res.text().then(function(body){
+          runWordReviewHandleRateLimitResponse(res, body, {silent:opts.silent});
           var msg='HTTP '+res.status+' at '+url;
           if(body){
             try{
@@ -5180,6 +5198,129 @@ function runWordReviewCanMutate(notify){
     return false;
   }
   return true;
+}
+function runWordReviewRateLimitRemainingMs(){
+  return Math.max(0, safeInt(runWordReviewRateLimitUntil,0)-Date.now());
+}
+function runWordReviewRateLimitStopTicker(){
+  if(!runWordReviewRateLimitTicker) return;
+  clearInterval(runWordReviewRateLimitTicker);
+  runWordReviewRateLimitTicker=null;
+}
+function runWordReviewRenderRateLimitWarning(){
+  if(!wrRateLimitWarningEl) return;
+  var remain=runWordReviewRateLimitRemainingMs();
+  if(remain<=0){
+    wrRateLimitWarningEl.hidden=true;
+    wrRateLimitWarningEl.textContent='';
+    runWordReviewRateLimitStopTicker();
+    return;
+  }
+  var sec=Math.max(1, Math.ceil(remain/1000));
+  var base=(runWordReviewRateLimitMessage && String(runWordReviewRateLimitMessage).trim())
+    ? String(runWordReviewRateLimitMessage).trim()
+    : 'Too many requests sent to cloud API.';
+  wrRateLimitWarningEl.textContent=base+' Cooldown: '+sec+'s';
+  wrRateLimitWarningEl.hidden=false;
+}
+function runWordReviewSetRateLimit(ms, message, opts){
+  opts=opts || {};
+  var coolMs=Math.max(0, safeInt(ms,0));
+  if(!coolMs){
+    runWordReviewRateLimitUntil=0;
+    runWordReviewRateLimitMessage='';
+    runWordReviewRenderRateLimitWarning();
+    return;
+  }
+  var nextUntil=Date.now()+coolMs;
+  if(nextUntil>runWordReviewRateLimitUntil){
+    runWordReviewRateLimitUntil=nextUntil;
+  }
+  if(message){
+    runWordReviewRateLimitMessage=String(message).trim();
+  }
+  runWordReviewRenderRateLimitWarning();
+  if(!runWordReviewRateLimitTicker){
+    runWordReviewRateLimitTicker=setInterval(runWordReviewRenderRateLimitWarning, 250);
+  }
+  if(!opts.silent){
+    toast('Cloud API cooldown active.');
+  }
+}
+function runWordReviewCanCallRemote(opts){
+  opts=opts || {};
+  var remain=runWordReviewRateLimitRemainingMs();
+  if(remain<=0){
+    runWordReviewRenderRateLimitWarning();
+    return true;
+  }
+  runWordReviewRenderRateLimitWarning();
+  if(!opts.silent){
+    toast('Cloud API cooldown: '+Math.max(1,Math.ceil(remain/1000))+'s remaining.');
+  }
+  return false;
+}
+function runWordReviewHandleRateLimitResponse(res, body, opts){
+  if(!res || safeInt(res.status,0)!==429) return false;
+  var retryMs=0;
+  try{
+    if(res.headers && res.headers.get){
+      var ra=String(res.headers.get('Retry-After') || '').trim();
+      var raNum=parseFloat(ra);
+      if(isFinite(raNum) && raNum>0){
+        retryMs=Math.max(retryMs, Math.round(raNum*1000));
+      }
+    }
+  }catch(_){ }
+  var msg='Too many requests sent to cloud API.';
+  if(body){
+    try{
+      var parsed=JSON.parse(String(body));
+      if(parsed && parsed.error){ msg=String(parsed.error); }
+      if(parsed && parsed.hint){ msg += ' '+String(parsed.hint); }
+      if(parsed && parsed.retryAfterMs){
+        retryMs=Math.max(retryMs, safeInt(parsed.retryAfterMs,0));
+      }
+    }catch(_){ }
+  }
+  if(!retryMs) retryMs=RUN_WORD_REVIEW_RATE_LIMIT_DEFAULT_MS;
+  runWordReviewSetRateLimit(retryMs, msg, opts);
+  return true;
+}
+async function runWordReviewFlushSave(opts){
+  opts=opts || {};
+  var force=!!opts.force;
+  var silent=!!opts.silent;
+  if(runWordReviewSaveInFlight) return false;
+  if(!force && !runWordReviewDirty) return true;
+  runWordReviewSaveInFlight=true;
+  try{
+    var useRemote=runWordReviewRemoteWritable();
+    var ok=await runSaveWordReviewToFile({silent:(useRemote || silent)});
+    if(!ok){
+      ok=await runSaveWordReviewToRemote({silent:silent});
+    }
+    if(ok){
+      runWordReviewDirty=false;
+    }
+    return ok;
+  }finally{
+    runWordReviewSaveInFlight=false;
+  }
+}
+function runWordReviewAutosaveTick(){
+  if(!wordReviewModal || !wordReviewModal.classList.contains('open')) return;
+  if(!runWordReviewDirty || runWordReviewSaveInFlight) return;
+  runWordReviewFlushSave({silent:true});
+}
+function runStartWordReviewAutosave(){
+  if(runWordReviewAutosaveTimer) return;
+  runWordReviewAutosaveTimer=setInterval(runWordReviewAutosaveTick, RUN_WORD_REVIEW_AUTOSAVE_MS);
+}
+function runStopWordReviewAutosave(){
+  if(!runWordReviewAutosaveTimer) return;
+  clearInterval(runWordReviewAutosaveTimer);
+  runWordReviewAutosaveTimer=null;
 }
 function runNormalizeWordReviewDefs(raw){
   var out={};
@@ -5506,6 +5647,7 @@ function runRenderWordReview(forceNext){
     runWordReviewBatch=[];
     runInvalidateWordReviewSearchIndex();
   }
+  runWordReviewRenderRateLimitWarning();
   runEnsureWordReviewBatch(5);
   runClampWordReviewSelection();
   var stats=runWordReviewStats();
@@ -5576,6 +5718,7 @@ function openWordReviewModal(){
   runUpdateWordReviewControls();
   runWordReviewBatch=[];
   runWordReviewSelectedIndex=0;
+  runStartWordReviewAutosave();
   wordReviewModal.classList.add('open');
   document.body.style.overflow='hidden';
 
@@ -5605,6 +5748,8 @@ function closeWordReviewModal(){
   if(!wordReviewModal) return;
   wordReviewModal.classList.remove('open');
   document.body.style.overflow='';
+  runStopWordReviewAutosave();
+  runWordReviewFlushSave({silent:false});
 }
 function runWordReviewSetStatus(word, status, opts){
   opts=opts || {};
@@ -5627,8 +5772,10 @@ function runWordReviewSetStatus(word, status, opts){
   runWordReviewMutationRev++;
   delete runWordReviewFile.approved[w];
   delete runWordReviewFile.rejected[w];
+  delete runWordReviewFile.pending[w];
   delete runWordReviewLocal.approved[w];
   delete runWordReviewLocal.rejected[w];
+  delete runWordReviewLocal.pending[w];
 
   if(status==='approved'){
     runWordReviewFile.approved[w]=true;
@@ -5638,8 +5785,9 @@ function runWordReviewSetStatus(word, status, opts){
     runWordReviewFile.rejected[w]=true;
     runWordReviewLocal.rejected[w]=true;
     if(!opts.silent) toast('Rejected '+w);
-  }else if(!opts.silent){
-    toast('Set '+w+' to pending');
+  }else{
+    runWordReviewLocal.pending[w]=true;
+    if(!opts.silent) toast('Set '+w+' to pending');
   }
   runWordReviewSave();
   runRebuildWordReview();
@@ -5650,11 +5798,8 @@ function runWordReviewSetStatus(word, status, opts){
     buildCampaignMenu();
     requestAnimationFrame(focusCampaignMap);
   }
+  runWordReviewDirty=true;
   runRenderWordReview(false);
-  runSaveWordReviewToFile({silent:true}).then(function(ok){
-    if(ok) return;
-    runSaveWordReviewToRemote({silent:true});
-  });
   return true;
 }
 function runApplyWordReviewDecision(word, approved){
@@ -5809,6 +5954,7 @@ var wrSearchInput=$('#wrSearchInput');
 var wrSearchStatus=$('#wrSearchStatus');
 var wrSearchClearBtn=$('#wrSearchClear');
 var wrSearchResultsEl=$('#wrSearchResults');
+var wrRateLimitWarningEl=$('#wrRateLimitWarning');
 var wrCloseBtn=$('#wrClose');
 var wrReloadBtn=$('#wrReload');
 var wrBindFileBtn=$('#wrBindFile');
@@ -5829,8 +5975,16 @@ var runWordReviewSelectedIndex=0;
 var RUN_WORD_REVIEW_DEF_KEY='campaign_word_defs_v1';
 var RUN_WORD_REVIEW_DEF_RETRY_MS=60*60*1000;
 var RUN_WORD_REVIEW_DEF_CACHE_MAX=1200;
+var RUN_WORD_REVIEW_AUTOSAVE_MS=30000;
+var RUN_WORD_REVIEW_RATE_LIMIT_DEFAULT_MS=10000;
 var runWordReviewDefs=runNormalizeWordReviewDefs(load(RUN_WORD_REVIEW_DEF_KEY, null));
 var runWordReviewDefInflight={};
+var runWordReviewAutosaveTimer=null;
+var runWordReviewDirty=false;
+var runWordReviewSaveInFlight=false;
+var runWordReviewRateLimitUntil=0;
+var runWordReviewRateLimitMessage='';
+var runWordReviewRateLimitTicker=null;
 var runWordReviewFileHandle=null;
 var runWordReviewFileSync={lastOk:0,lastError:'',lastTarget:''};
 var started=false;
@@ -5984,6 +6138,10 @@ var runWordReviewAuthed=false;
 var runWordReviewFile=runNormalizeWordReview(null);
 var runWordReviewLocal=runNormalizeWordReview(load(RUN_WORD_REVIEW_KEY, null));
 var runWordReview=runMergeWordReview(runWordReviewFile, runWordReviewLocal);
+runWordReviewDirty=
+  Object.keys(runWordReviewLocal.approved).length>0
+  || Object.keys(runWordReviewLocal.rejected).length>0
+  || Object.keys(runWordReviewLocal.pending).length>0;
 var runWordReviewFileMeta={url:'',loaded:false,lastError:''};
 var runWordReviewMutationRev=0;
 var runWordReviewLoadSeq=0;
@@ -5991,6 +6149,7 @@ function runNormalizeWordReview(raw){
   raw=raw||{};
   var approved={};
   var rejected={};
+  var pending={};
   function addWords(input, into){
     if(!input) return;
     var list=[];
@@ -6010,18 +6169,41 @@ function runNormalizeWordReview(raw){
   }
   addWords(raw.approved, approved);
   addWords(raw.rejected, rejected);
+  addWords(raw.pending, pending);
   Object.keys(rejected).forEach(function(w){ delete approved[w]; });
-  return {approved:approved, rejected:rejected};
+  Object.keys(pending).forEach(function(w){
+    delete approved[w];
+    delete rejected[w];
+  });
+  return {approved:approved, rejected:rejected, pending:pending};
 }
 function runMergeWordReview(base, overlay){
   base=runNormalizeWordReview(base);
   overlay=runNormalizeWordReview(overlay);
-  var out={approved:{}, rejected:{}};
+  var out={approved:{}, rejected:{}, pending:{}};
   Object.keys(base.approved).forEach(function(w){ out.approved[w]=true; });
-  Object.keys(overlay.approved).forEach(function(w){ out.approved[w]=true; });
   Object.keys(base.rejected).forEach(function(w){ out.rejected[w]=true; });
-  Object.keys(overlay.rejected).forEach(function(w){ out.rejected[w]=true; });
-  Object.keys(out.rejected).forEach(function(w){ delete out.approved[w]; });
+  Object.keys(base.pending).forEach(function(w){
+    out.pending[w]=true;
+    delete out.approved[w];
+    delete out.rejected[w];
+  });
+  Object.keys(overlay.pending).forEach(function(w){
+    out.pending[w]=true;
+    delete out.approved[w];
+    delete out.rejected[w];
+  });
+  // Local overlay should win over file state so edits can flip statuses.
+  Object.keys(overlay.approved).forEach(function(w){
+    delete out.rejected[w];
+    delete out.pending[w];
+    out.approved[w]=true;
+  });
+  Object.keys(overlay.rejected).forEach(function(w){
+    delete out.approved[w];
+    delete out.pending[w];
+    out.rejected[w]=true;
+  });
   return out;
 }
 function runRebuildWordReview(){
@@ -6030,7 +6212,8 @@ function runRebuildWordReview(){
 function runWordReviewSave(){
   save(RUN_WORD_REVIEW_KEY, {
     approved:Object.keys(runWordReviewLocal.approved).sort(),
-    rejected:Object.keys(runWordReviewLocal.rejected).sort()
+    rejected:Object.keys(runWordReviewLocal.rejected).sort(),
+    pending:Object.keys(runWordReviewLocal.pending).sort()
   });
 }
 function runWordReviewMergedSnapshot(){
@@ -6129,6 +6312,9 @@ async function runAuthenticateWordReviewKey(key, opts){
     if(!opts.silent) toast('Campaign word API URL is not set.');
     return false;
   }
+  if(!runWordReviewCanCallRemote({silent:opts.silent})){
+    return false;
+  }
   var probe=url + (url.indexOf('?')>=0 ? '&' : '?') + 'authCheck=1&_ts=' + Date.now();
   try{
     var res=await fetch(probe,{
@@ -6138,6 +6324,7 @@ async function runAuthenticateWordReviewKey(key, opts){
     });
     if(!res.ok){
       var body=await res.text();
+      runWordReviewHandleRateLimitResponse(res, body, {silent:opts.silent});
       var msg='HTTP '+res.status+' at '+url;
       if(body){
         try{
@@ -6301,6 +6488,11 @@ async function runSaveWordReviewToRemote(opts){
     runRenderWordReview(false);
     return false;
   }
+  if(!runWordReviewCanCallRemote({silent:opts.silent})){
+    runWordReviewFileSync.lastError='cloud cooldown active';
+    runRenderWordReview(false);
+    return false;
+  }
   var baselineLoaded=false;
   try{
     baselineLoaded=await runLoadWordReviewFromFile({silent:true, force:true, url:url});
@@ -6328,6 +6520,7 @@ async function runSaveWordReviewToRemote(opts){
     });
     if(!res.ok){
       var body=await res.text();
+      runWordReviewHandleRateLimitResponse(res, body, {silent:opts.silent});
       var msg='HTTP '+res.status+' at '+url;
       if(body){
         try{
@@ -8815,7 +9008,7 @@ if(wrSearchResultsEl){
 }
 document.addEventListener('keydown', runHandleWordReviewHotkeys);
 if(wrBindFileBtn){ wrBindFileBtn.addEventListener('click', function(){ runBindWordReviewFile(); }); }
-if(wrSaveFileBtn){ wrSaveFileBtn.addEventListener('click', function(){ var useRemote=runWordReviewRemoteWritable(); runSaveWordReviewToFile({silent:useRemote}).then(function(ok){ if(ok) return; return runSaveWordReviewToRemote({silent:false}); }); }); }
+if(wrSaveFileBtn){ wrSaveFileBtn.addEventListener('click', function(){ runWordReviewFlushSave({force:true, silent:false}); }); }
 if(wrReloadBtn){ wrReloadBtn.addEventListener('click', function(){ if(!runWordReviewAuthed){ toast('Authenticate in Options first.'); return; } runWordReviewLoading=true; runRenderWordReview(false); runLoadWordReviewFromFile({silent:false, force:true}).then(function(ok){ runWordReviewLoading=false; if(ok) runWordReviewNeedsInitialLoad=false; runRenderWordReview(true); }); }); }
 if(wordReviewModal){
   wordReviewModal.addEventListener('click', function(e){
