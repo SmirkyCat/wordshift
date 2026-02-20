@@ -1,6 +1,7 @@
 'use strict';
 
 const KEY = 'campaign_words';
+const VERSION = '2026-02-20-debug1';
 
 function json(statusCode, data) {
   return {
@@ -54,6 +55,23 @@ function normalizePayload(raw) {
   };
 }
 
+function envPresence() {
+  return {
+    NETLIFY_SITE_ID: !!process.env.NETLIFY_SITE_ID,
+    SITE_ID: !!process.env.SITE_ID,
+    BLOBS_SITE_ID: !!process.env.BLOBS_SITE_ID,
+    NETLIFY_AUTH_TOKEN: !!process.env.NETLIFY_AUTH_TOKEN,
+    BLOBS_TOKEN: !!process.env.BLOBS_TOKEN,
+    NETLIFY_BLOBS_TOKEN: !!process.env.NETLIFY_BLOBS_TOKEN
+  };
+}
+
+function getQueryParam(event, key) {
+  if (event && event.queryStringParameters && Object.prototype.hasOwnProperty.call(event.queryStringParameters, key)) {
+    return event.queryStringParameters[key];
+  }
+  return '';
+}
 async function resolveStore(context) {
   // Prefer runtime-provided blobs when available.
   if (context && context.blobs && typeof context.blobs.getStore === 'function') {
@@ -105,6 +123,15 @@ exports.handler = async (event, context) => {
     const store = await resolveStore(context);
 
     if (event.httpMethod === 'GET') {
+      const debug = String(getQueryParam(event, 'debug') || '').toLowerCase();
+      if (debug === '1' || debug === 'true' || debug === 'yes') {
+        return json(200, {
+          ok: true,
+          version: VERSION,
+          env: envPresence()
+        });
+      }
+
       const stored = await store.get(KEY, { type: 'json' });
       const payload = normalizePayload(stored || { approved: [], rejected: [] });
       if (!stored) {
