@@ -1769,6 +1769,18 @@ button.primary.disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.1)}
       <label>Reload campaign word file</label>
       <button class="secondary" id="optWordReviewReload">Reload</button>
     </div>
+    <div class="row">
+      <label for="optReviewKey">Private admin key</label>
+      <input id="optReviewKey" type="password" placeholder="Enter private key" autocomplete="off">
+    </div>
+    <div class="row">
+      <label>Campaign words access</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="secondary" id="optReviewAuth" type="button">Authenticate</button>
+        <button class="secondary" id="optReviewLogout" type="button">Logout</button>
+        <span id="optReviewAuthState" style="opacity:.8">Locked</span>
+      </div>
+    </div>
     <div class="actions">
       <button class="secondary" id="optClose">Close</button>
     </div>
@@ -4760,7 +4772,10 @@ function runLoadWordReviewFromFile(opts){
   }
 
   try{
-    return fetch(reqUrl,{mode:'cors',cache:'no-store'}).then(function(res){
+    var loadOpts={mode:'cors',cache:'no-store'};
+    var loadHeaders=runWordReviewAuthHeaders('', false);
+    if(Object.keys(loadHeaders).length){ loadOpts.headers=loadHeaders; }
+    return fetch(reqUrl,loadOpts).then(function(res){
       if(!res.ok){
         return res.text().then(function(body){
           var msg='HTTP '+res.status+' at '+url;
@@ -5030,6 +5045,10 @@ function runRenderWordReview(forceNext){
 }
 function openWordReviewModal(){
   if(!wordReviewModal) return;
+  if(!runWordReviewAuthed){
+    toast('Authenticate in Options to unlock Campaign Words.');
+    return;
+  }
   runUpdateWordReviewControls();
   runWordReviewBatch=[];
   wordReviewModal.classList.add('open');
@@ -5063,6 +5082,10 @@ function closeWordReviewModal(){
   document.body.style.overflow='';
 }
 function runApplyWordReviewDecision(word, approved){
+  if(!runWordReviewAuthed){
+    toast('Authenticate in Options before editing campaign words.');
+    return;
+  }
   var w=lettersOnlyUpper(word||'');
   if(!w){
     runRenderWordReview(true);
@@ -5093,6 +5116,10 @@ function runApplyWordReviewDecision(word, approved){
   });
 }
 function runSkipWordReviewWord(word){
+  if(!runWordReviewAuthed){
+    toast('Authenticate in Options before editing campaign words.');
+    return;
+  }
   var w=lettersOnlyUpper(word||'');
   if(!w){
     runRenderWordReview(false);
@@ -5233,6 +5260,10 @@ var wrCloseBtn=$('#wrClose');
 var wrReloadBtn=$('#wrReload');
 var wrBindFileBtn=$('#wrBindFile');
 var wrSaveFileBtn=$('#wrSaveFile');
+var optReviewKey=$('#optReviewKey');
+var optReviewAuthBtn=$('#optReviewAuth');
+var optReviewLogoutBtn=$('#optReviewLogout');
+var optReviewAuthState=$('#optReviewAuthState');
 var runWordReviewBatch=[];
 var runWordReviewLoading=false;
 var runWordReviewNeedsInitialLoad=true;
@@ -5361,6 +5392,7 @@ var runFailPendingReset=false;
 var RUN_WORD_REVIEW_KEY='campaign_word_review_v1';
 var RUN_WORD_REVIEW_FILE_KEY='campaign_word_review_file_url';
 var RUN_WORD_REVIEW_WRITE_KEY='campaign_word_review_write_url';
+var RUN_WORD_REVIEW_AUTH_SESSION_KEY='campaign_word_review_auth_session_v1';
 var runWordReviewDefaultUrl=(location && location.protocol!=='file:') ? '/.netlify/functions/word-review' : 'campaign_words.json';
 var runWordReviewFileUrl=String(load(RUN_WORD_REVIEW_FILE_KEY,runWordReviewDefaultUrl)||runWordReviewDefaultUrl);
 if((runWordReviewFileUrl||'').trim().toLowerCase()==='campaign_words.json' && location && location.protocol!=='file:'){
@@ -5368,6 +5400,23 @@ if((runWordReviewFileUrl||'').trim().toLowerCase()==='campaign_words.json' && lo
   save(RUN_WORD_REVIEW_FILE_KEY, runWordReviewFileUrl);
 }
 var runWordReviewWriteUrl=String(load(RUN_WORD_REVIEW_WRITE_KEY,'/.netlify/functions/word-review')||'/.netlify/functions/word-review');
+function runReadWordReviewAuthKey(){
+  try{
+    return String((window.sessionStorage && sessionStorage.getItem(RUN_WORD_REVIEW_AUTH_SESSION_KEY)) || '').trim();
+  }catch(_){
+    return '';
+  }
+}
+function runWriteWordReviewAuthKey(key){
+  try{
+    if(!window.sessionStorage) return;
+    var v=String(key||'').trim();
+    if(v){ sessionStorage.setItem(RUN_WORD_REVIEW_AUTH_SESSION_KEY, v); }
+    else{ sessionStorage.removeItem(RUN_WORD_REVIEW_AUTH_SESSION_KEY); }
+  }catch(_){ }
+}
+var runWordReviewAuthKey=runReadWordReviewAuthKey();
+var runWordReviewAuthed=false;
 var runWordReviewFile=runNormalizeWordReview(null);
 var runWordReviewLocal=runNormalizeWordReview(load(RUN_WORD_REVIEW_KEY, null));
 var runWordReview=runMergeWordReview(runWordReviewFile, runWordReviewLocal);
@@ -5436,6 +5485,94 @@ function runWordReviewRemoteWritable(){
   if(/^\/\.netlify\/functions\/word-review(?:\?|$)/i.test(u)) return true;
   return /^https?:\/\/[^\s]+\/\.netlify\/functions\/word-review(?:\?|$)/i.test(u);
 }
+function runWordReviewAuthHeaders(key, includeContentType){
+  var out={};
+  if(includeContentType){ out['Content-Type']='application/json'; }
+  var useKey=String((typeof key==='string' && key.length) ? key : (runWordReviewAuthKey || '')).trim();
+  if(useKey){ out['X-Wordshift-Key']=useKey; }
+  return out;
+}
+function runUpdatePrivateAccessUI(){
+  var authed=!!runWordReviewAuthed;
+  if(wordReviewBtn){
+    wordReviewBtn.style.display = authed ? '' : 'none';
+    wordReviewBtn.disabled = !authed;
+    wordReviewBtn.title = authed ? 'Campaign word review unlocked' : 'Authenticate in Options to unlock Campaign Words';
+  }
+  if(optReviewAuthState){
+    optReviewAuthState.textContent = authed ? 'Authenticated' : 'Locked';
+    optReviewAuthState.style.color = authed ? 'var(--correct)' : 'var(--muted)';
+  }
+  if(optReviewLogoutBtn){
+    optReviewLogoutBtn.disabled = !authed;
+  }
+}
+async function runAuthenticateWordReviewKey(key, opts){
+  opts=opts || {};
+  var candidate=String(key||'').trim();
+  if(!candidate){
+    if(!opts.silent) toast('Enter your private admin key first.');
+    return false;
+  }
+  if(!runWordReviewRemoteWritable()){
+    if(!opts.silent) toast('Cloud API not configured for authentication.');
+    return false;
+  }
+  var url=String(runWordReviewWriteUrl||runWordReviewFileUrl||'').trim();
+  if(!url){
+    if(!opts.silent) toast('Campaign word API URL is not set.');
+    return false;
+  }
+  var probe=url + (url.indexOf('?')>=0 ? '&' : '?') + 'authCheck=1&_ts=' + Date.now();
+  try{
+    var res=await fetch(probe,{
+      mode:'cors',
+      cache:'no-store',
+      headers:runWordReviewAuthHeaders(candidate, false)
+    });
+    if(!res.ok){
+      var body=await res.text();
+      var msg='HTTP '+res.status+' at '+url;
+      if(body){
+        try{
+          var parsed=JSON.parse(body);
+          if(parsed && parsed.error){ msg += ' - ' + parsed.error; }
+          else{ msg += ' - ' + String(body).slice(0,180); }
+        }catch(_){
+          msg += ' - ' + String(body).slice(0,180);
+        }
+      }
+      throw new Error(msg);
+    }
+    runWordReviewAuthKey=candidate;
+    runWriteWordReviewAuthKey(candidate);
+    runWordReviewAuthed=true;
+    if(optReviewKey && !opts.keepInput){ optReviewKey.value=''; }
+    runUpdateWordReviewControls();
+    if(!opts.silent) toast('Authenticated. Campaign word editing unlocked.');
+    return true;
+  }catch(e){
+    runWordReviewAuthed=false;
+    runWordReviewAuthKey='';
+    runWriteWordReviewAuthKey('');
+    runUpdateWordReviewControls();
+    if(!opts.silent){
+      toast('Authentication failed.');
+      console.error(e);
+    }
+    return false;
+  }
+}
+function runWordReviewLogout(opts){
+  opts=opts || {};
+  runWordReviewAuthed=false;
+  runWordReviewAuthKey='';
+  runWriteWordReviewAuthKey('');
+  if(optReviewKey && !opts.keepInput){ optReviewKey.value=''; }
+  if(wordReviewModal && wordReviewModal.classList.contains('open')){ closeWordReviewModal(); }
+  runUpdateWordReviewControls();
+  if(!opts.silent) toast('Private access locked.');
+}
 function runWordReviewSyncStateText(){
   var target='Write target: ' + ((runWordReviewFileHandle && runWordReviewFileHandle.name) ? runWordReviewFileHandle.name : (runWordReviewRemoteWritable() ? ('cloud '+runWordReviewWriteUrl) : 'not bound'));
   var status='';
@@ -5446,9 +5583,14 @@ function runWordReviewSyncStateText(){
   }else{
     status='Last file save: none';
   }
-  return target + ' | ' + status;
+  var auth='Auth: ' + (runWordReviewAuthed ? 'authenticated' : 'locked');
+  return target + ' | ' + status + ' | ' + auth;
 }
 async function runBindWordReviewFile(){
+  if(!runWordReviewAuthed){
+    toast('Authenticate in Options before editing campaign words.');
+    return false;
+  }
   if(!window.isSecureContext || !window.showOpenFilePicker){
     toast('Direct file writing is not supported here. Use Save Now for cloud sync.');
     return false;
@@ -5487,6 +5629,11 @@ async function runBindWordReviewFile(){
 }
 async function runSaveWordReviewToFile(opts){
   opts=opts || {};
+  if(!runWordReviewAuthed){
+    runWordReviewFileSync.lastError='not authenticated';
+    if(!opts.silent) toast('Authenticate in Options before editing campaign words.');
+    return false;
+  }
   if(!runWordReviewFileHandle || !runWordReviewFileHandle.createWritable){
     if(!opts.silent) toast('Bind a JSON file first.');
     return false;
@@ -5541,6 +5688,12 @@ async function runSaveWordReviewToRemote(opts){
     if(!opts.silent) toast('Cloud API not configured. Expected '+runWordReviewWriteUrl);
     return false;
   }
+  if(!runWordReviewAuthed || !runWordReviewAuthKey){
+    runWordReviewFileSync.lastError='not authenticated';
+    if(!opts.silent) toast('Authenticate in Options before cloud save.');
+    runRenderWordReview(false);
+    return false;
+  }
   var baselineLoaded=false;
   try{
     baselineLoaded=await runLoadWordReviewFromFile({silent:true, force:true, url:url});
@@ -5563,7 +5716,7 @@ async function runSaveWordReviewToRemote(opts){
       method:'POST',
       mode:'cors',
       cache:'no-store',
-      headers:{'Content-Type':'application/json'},
+      headers:runWordReviewAuthHeaders('', true),
       body:JSON.stringify(payload)
     });
     if(!res.ok){
@@ -5617,6 +5770,9 @@ async function runSaveWordReviewToRemote(opts){
 function runSetWordReviewFileUrl(url){
   runWordReviewFileUrl=String(url||'').trim();
   save(RUN_WORD_REVIEW_FILE_KEY, runWordReviewFileUrl);
+  runWordReviewNeedsInitialLoad=true;
+  runWordReviewFileMeta.loaded=false;
+  runWordReviewFileMeta.url='';
   if(/\/\.netlify\/functions\/word-review(?:\?|$)/i.test(runWordReviewFileUrl)){
     runWordReviewWriteUrl=runWordReviewFileUrl;
     save(RUN_WORD_REVIEW_WRITE_KEY, runWordReviewWriteUrl);
@@ -5624,13 +5780,24 @@ function runSetWordReviewFileUrl(url){
 }
 function runUpdateWordReviewControls(){
   var supportsFile=!!(window.isSecureContext && window.showOpenFilePicker);
+  var authed=!!runWordReviewAuthed;
   if(wrBindFileBtn){
     wrBindFileBtn.style.display = supportsFile ? '' : 'none';
+    wrBindFileBtn.disabled = !authed;
+    wrBindFileBtn.title = authed ? '' : 'Authenticate in Options first.';
   }
   if(wrSaveFileBtn){
     wrSaveFileBtn.textContent = supportsFile ? 'Save Now' : 'Save to Cloud';
-    wrSaveFileBtn.title = supportsFile ? '' : 'Direct file write unsupported on this browser; saves via cloud API.';
+    wrSaveFileBtn.disabled = !authed;
+    var saveTitle = supportsFile ? '' : 'Direct file write unsupported on this browser; saves via cloud API.';
+    if(!authed){ saveTitle = (saveTitle ? (saveTitle + ' ') : '') + 'Authenticate in Options first.'; }
+    wrSaveFileBtn.title = saveTitle;
   }
+  if(wrReloadBtn){
+    wrReloadBtn.disabled=!authed;
+    wrReloadBtn.title = authed ? '' : 'Authenticate in Options first.';
+  }
+  runUpdatePrivateAccessUI();
 }
 function runWordReviewStatus(word){
   word=lettersOnlyUpper(word||'');
@@ -7715,6 +7882,8 @@ function openOptions(){
   if(modal) modal.classList.add('open');
   var inp=$('#optWordReviewUrl');
   if(inp) inp.value=runWordReviewFileUrl;
+  if(optReviewKey) optReviewKey.value='';
+  runUpdateWordReviewControls();
 }
 function closeOptions(){
   var modal=$('#optionsModal');
@@ -7910,6 +8079,24 @@ if(optWordReviewUrl){
     runSetWordReviewFileUrl(optWordReviewUrl.value);
   });
 }
+if(optReviewAuthBtn){
+  optReviewAuthBtn.addEventListener('click', function(){
+    runAuthenticateWordReviewKey(optReviewKey ? optReviewKey.value : '', {silent:false});
+  });
+}
+if(optReviewLogoutBtn){
+  optReviewLogoutBtn.addEventListener('click', function(){
+    runWordReviewLogout({silent:false});
+  });
+}
+if(optReviewKey){
+  optReviewKey.addEventListener('keydown', function(e){
+    if(e.key==='Enter'){
+      e.preventDefault();
+      runAuthenticateWordReviewKey(optReviewKey.value, {silent:false});
+    }
+  });
+}
 if(hsWordSource){
   hsWordSource.addEventListener('change', toggleHotseatCustomRow);
   hsWordSource.addEventListener('click', toggleHotseatCustomRow);
@@ -7948,6 +8135,11 @@ if(wrListEl){
     var btn=(e.target.closest && e.target.closest('button[data-wr-action]')) ? e.target.closest('button[data-wr-action]') : null;
     if(!btn) return;
 
+    if(!runWordReviewAuthed){
+      toast('Authenticate in Options before editing campaign words.');
+      return;
+    }
+
     if(runWordReviewLoading){
       toast('Word review file is still loading.');
       return;
@@ -7969,13 +8161,18 @@ if(wrListEl){
 }
 if(wrBindFileBtn){ wrBindFileBtn.addEventListener('click', function(){ runBindWordReviewFile(); }); }
 if(wrSaveFileBtn){ wrSaveFileBtn.addEventListener('click', function(){ var useRemote=runWordReviewRemoteWritable(); runSaveWordReviewToFile({silent:useRemote}).then(function(ok){ if(ok) return; return runSaveWordReviewToRemote({silent:false}); }); }); }
-if(wrReloadBtn){ wrReloadBtn.addEventListener('click', function(){ runWordReviewLoading=true; runRenderWordReview(false); runLoadWordReviewFromFile({silent:false, force:true}).then(function(ok){ runWordReviewLoading=false; if(ok) runWordReviewNeedsInitialLoad=false; runRenderWordReview(true); }); }); }
+if(wrReloadBtn){ wrReloadBtn.addEventListener('click', function(){ if(!runWordReviewAuthed){ toast('Authenticate in Options first.'); return; } runWordReviewLoading=true; runRenderWordReview(false); runLoadWordReviewFromFile({silent:false, force:true}).then(function(ok){ runWordReviewLoading=false; if(ok) runWordReviewNeedsInitialLoad=false; runRenderWordReview(true); }); }); }
 if(wordReviewModal){
   wordReviewModal.addEventListener('click', function(e){
     if(e.target===wordReviewModal) closeWordReviewModal();
   });
 }
 if(PASS_OVERLAY){ PASS_OVERLAY.addEventListener('click', hidePassOverlay); }
+if(runWordReviewAuthKey){
+  runAuthenticateWordReviewKey(runWordReviewAuthKey, {silent:true, keepInput:true});
+}else{
+  runUpdateWordReviewControls();
+}
 buildCampaignMenu();
 showMenu();
 runLoadWordReviewFromFile({silent:true});

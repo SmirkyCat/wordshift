@@ -1,7 +1,7 @@
 'use strict';
 
 const KEY = 'campaign_words';
-const VERSION = '2026-02-20-debug1';
+const VERSION = '2026-02-20-auth1';
 
 function json(statusCode, data) {
   return {
@@ -11,7 +11,7 @@ function json(statusCode, data) {
       'Cache-Control': 'no-store',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Wordshift-Key, X-Admin-Key'
     },
     body: JSON.stringify(data)
   };
@@ -62,7 +62,8 @@ function envPresence() {
     BLOBS_SITE_ID: !!process.env.BLOBS_SITE_ID,
     NETLIFY_AUTH_TOKEN: !!process.env.NETLIFY_AUTH_TOKEN,
     BLOBS_TOKEN: !!process.env.BLOBS_TOKEN,
-    NETLIFY_BLOBS_TOKEN: !!process.env.NETLIFY_BLOBS_TOKEN
+    NETLIFY_BLOBS_TOKEN: !!process.env.NETLIFY_BLOBS_TOKEN,
+    WORD_REVIEW_ADMIN_KEY: !!process.env.WORD_REVIEW_ADMIN_KEY
   };
 }
 
@@ -72,6 +73,48 @@ function getQueryParam(event, key) {
   }
   return '';
 }
+
+function getHeaderValue(event, headerName) {
+  if (!event || !event.headers) return '';
+  const wanted = String(headerName || '').toLowerCase();
+  const keys = Object.keys(event.headers);
+  for (const key of keys) {
+    if (String(key || '').toLowerCase() === wanted) {
+      return String(event.headers[key] || '');
+    }
+  }
+  return '';
+}
+
+function getConfiguredAdminKey() {
+  return String(process.env.WORD_REVIEW_ADMIN_KEY || '').trim();
+}
+
+function isAdminAuthConfigured() {
+  return !!getConfiguredAdminKey();
+}
+
+function getAuthKeyFromEvent(event) {
+  const direct = String(
+    getHeaderValue(event, 'x-wordshift-key')
+    || getHeaderValue(event, 'x-admin-key')
+    || ''
+  ).trim();
+  if (direct) return direct;
+  const auth = String(getHeaderValue(event, 'authorization') || '').trim();
+  if (!auth) return '';
+  const m = /^Bearer\s+(.+)$/i.exec(auth);
+  if (!m) return '';
+  return String(m[1] || '').trim();
+}
+
+function isAuthorized(event) {
+  const expected = getConfiguredAdminKey();
+  if (!expected) return false;
+  const provided = getAuthKeyFromEvent(event);
+  return !!provided && provided === expected;
+}
+
 async function resolveStore(context) {
   // Load SDK at runtime so initialization errors become JSON responses.
   let mod = null;
@@ -130,6 +173,26 @@ exports.handler = async (event, context) => {
     const store = await resolveStore(context);
 
     if (event.httpMethod === 'GET') {
+      const authCheck = String(
+        getQueryParam(event, 'authCheck')
+        || getQueryParam(event, 'auth_check')
+        || getQueryParam(event, 'auth')
+        || ''
+      ).toLowerCase();
+      if (authCheck === '1' || authCheck === 'true' || authCheck === 'yes') {
+        if (!isAdminAuthConfigured()) {
+          return json(503, {
+            ok: false,
+            error: 'Admin key not configured on server',
+            hint: 'Set WORD_REVIEW_ADMIN_KEY in Netlify environment variables.'
+          });
+        }
+        if (!isAuthorized(event)) {
+          return json(401, { ok: false, error: 'Unauthorized' });
+        }
+        return json(200, { ok: true, authenticated: true, version: VERSION });
+      }
+
       const debug = String(getQueryParam(event, 'debug') || '').toLowerCase();
       if (debug === '1' || debug === 'true' || debug === 'yes') {
         return json(200, {
@@ -148,6 +211,17 @@ exports.handler = async (event, context) => {
     }
 
     if (event.httpMethod === 'POST' || event.httpMethod === 'PUT') {
+      if (!isAdminAuthConfigured()) {
+        return json(503, {
+          ok: false,
+          error: 'Admin key not configured on server',
+          hint: 'Set WORD_REVIEW_ADMIN_KEY in Netlify environment variables.'
+        });
+      }
+      if (!isAuthorized(event)) {
+        return json(401, { ok: false, error: 'Unauthorized' });
+      }
+
       let body = {};
       try {
         body = JSON.parse(event.body || '{}');
@@ -164,7 +238,7 @@ exports.handler = async (event, context) => {
   } catch (error) {
     return json(500, {
       error: String((error && error.message) || error || 'Unknown error'),
-      hint: 'Configure Blobs by setting NETLIFY_SITE_ID and NETLIFY_AUTH_TOKEN env vars in Netlify (or BLOBS_SITE_ID/BLOBS_TOKEN).'
+      hint: 'Configure Blobs with NETLIFY_SITE_ID + NETLIFY_AUTH_TOKEN and set WORD_REVIEW_ADMIN_KEY for private write access.'
 
     });
   }
