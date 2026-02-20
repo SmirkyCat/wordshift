@@ -7537,12 +7537,16 @@ function runEnsureLifelineStarter(target, starter, difficulty){
 function runAddLink(a,b){
   runCampaign.links.push([a,b]);
 }
-function runStageY(packStage, isBoss){
+function runStageBaselineY(packStage, isBoss){
   var maxStage=RUN_CLUSTER_DEPTH+1;
   var stage=clamp(safeInt(packStage,1),1,maxStage);
   var top=8, bottom=94;
   var t=(maxStage<=1) ? 0 : ((stage-1)/(maxStage-1));
   var y=bottom - (bottom-top)*t;
+  return clamp(y, 8, 94);
+}
+function runStageY(packStage, isBoss){
+  var y=runStageBaselineY(packStage, isBoss);
   if(!isBoss){ y += (runRandom()*2.4)-1.2; }
   return clamp(y, 8, 94);
 }
@@ -7713,7 +7717,7 @@ function runCreateUpgradeNode(packStage, mapX, usedUpgrades, mapY){
   var x=(typeof mapX==='number' && isFinite(mapX)) ? clamp(mapX,8,92) : 50;
   var y=(typeof mapY==='number' && isFinite(mapY))
     ? clamp(mapY,8,95)
-    : clamp(runStageY(packStage,false)+2.4+((runRandom()*1.8)-0.9),8,95);
+    : clamp(runStageBaselineY(packStage,false)+3.8,8,95);
   var node={
     id:id,
     type:'upgrade',
@@ -7771,8 +7775,8 @@ function runNodeOverlapPenaltyAt(x, y, node){
   var ny=(typeof node.map.y==='number' && isFinite(node.map.y)) ? node.map.y : 50;
   var dx=Math.abs(x - nx);
   var dy=Math.abs(y - ny);
-  var xPad=(node.type==='upgrade') ? 12.8 : 13.8;
-  var yPad=(node.type==='upgrade') ? 6.8 : 7.6;
+  var xPad=(node.type==='elite') ? 16.4 : ((node.type==='upgrade') ? 15.2 : 15.8);
+  var yPad=(node.type==='upgrade') ? 5.1 : 5.4;
   var px=Math.max(0, xPad - dx);
   var py=Math.max(0, yPad - dy);
   if(px<=0 || py<=0) return 0;
@@ -7807,6 +7811,94 @@ function runFindOpenNodeSpot(preferredX, preferredY, avoidNodes, xMin, xMax){
     y:Math.round(best.y*10)/10
   };
 }
+function runNodeCollisionHalfSize(node){
+  if(node && node.type==='elite') return {x:14.8, y:4.6};
+  if(node && node.type==='upgrade') return {x:13.6, y:4.4};
+  if(node && node.type==='boss') return {x:13.9, y:4.4};
+  return {x:13.2, y:4.2};
+}
+function runNodeVerticalBounds(node){
+  if(!node){ return {min:8,max:94}; }
+  var stage=safeInt(node.packStage,1);
+  if(node.type==='boss'){
+    var bossY=runStageBaselineY(stage,true);
+    return {min:clamp(bossY-0.5,8,94), max:clamp(bossY+0.5,8,94)};
+  }
+  var center=runStageBaselineY(stage,false);
+  if(node.type==='upgrade'){
+    var upMid=clamp(center+3.8,8,95);
+    return {min:clamp(upMid-3.3,8,95), max:clamp(upMid+3.3,8,95)};
+  }
+  return {min:clamp(center-3.0,8,94), max:clamp(center+3.0,8,94)};
+}
+function runResolveMapNodeOverlaps(){
+  if(!runCampaign || !runCampaign.nodes) return false;
+  var nodes=Object.keys(runCampaign.nodes).map(function(id){ return runCampaign.nodes[id]; }).filter(function(node){
+    return !!(node && node.map && typeof node.map.x==='number' && isFinite(node.map.x) && typeof node.map.y==='number' && isFinite(node.map.y));
+  });
+  if(nodes.length<2) return false;
+  var info=nodes.map(function(node){
+    return {
+      node:node,
+      size:runNodeCollisionHalfSize(node),
+      bounds:runNodeVerticalBounds(node)
+    };
+  });
+  var changed=false;
+  info.forEach(function(entry){
+    var node=entry.node;
+    var oldX=node.map.x, oldY=node.map.y;
+    node.map.x=clamp(node.map.x, 6.5, 93.5);
+    node.map.y=clamp(node.map.y, entry.bounds.min, entry.bounds.max);
+    if(Math.abs(node.map.x-oldX)>0.001 || Math.abs(node.map.y-oldY)>0.001){ changed=true; }
+  });
+  for(var pass=0; pass<72; pass++){
+    var moved=false;
+    for(var i=0;i<info.length;i++){
+      for(var j=i+1;j<info.length;j++){
+        var a=info[i], b=info[j];
+        var reqX=a.size.x + b.size.x + 0.9;
+        var reqY=a.size.y + b.size.y + 0.8;
+        var dx=b.node.map.x - a.node.map.x;
+        var dy=b.node.map.y - a.node.map.y;
+        var absX=Math.abs(dx), absY=Math.abs(dy);
+        var overlapX=reqX - absX;
+        var overlapY=reqY - absY;
+        if(overlapX<=0 || overlapY<=0) continue;
+        var moveX=overlapX <= overlapY;
+        if(moveX){
+          var dirX=(dx>=0) ? 1 : -1;
+          if(absX<0.0001){ dirX=((i+j)%2===0) ? 1 : -1; }
+          var pushX=(overlapX*0.5) + 0.08;
+          var oldAX=a.node.map.x, oldBX=b.node.map.x;
+          a.node.map.x=clamp(a.node.map.x - dirX*pushX, 6.5, 93.5);
+          b.node.map.x=clamp(b.node.map.x + dirX*pushX, 6.5, 93.5);
+          if(Math.abs(a.node.map.x-oldAX)>0.001 || Math.abs(b.node.map.x-oldBX)>0.001){ moved=true; }
+        }else{
+          var dirY=(dy>=0) ? 1 : -1;
+          if(absY<0.0001){ dirY=((i+j)%2===0) ? 1 : -1; }
+          var pushY=(overlapY*0.5) + 0.06;
+          var oldAY=a.node.map.y, oldBY=b.node.map.y;
+          a.node.map.y=clamp(a.node.map.y - dirY*pushY, a.bounds.min, a.bounds.max);
+          b.node.map.y=clamp(b.node.map.y + dirY*pushY, b.bounds.min, b.bounds.max);
+          if(Math.abs(a.node.map.y-oldAY)>0.001 || Math.abs(b.node.map.y-oldBY)>0.001){ moved=true; }
+        }
+      }
+    }
+    if(!moved) break;
+    changed=true;
+  }
+  Object.keys(runCampaign.nodes).forEach(function(id){
+    var node=runCampaign.nodes[id];
+    if(!node || !node.map) return;
+    var bounds=runNodeVerticalBounds(node);
+    var oldX=node.map.x, oldY=node.map.y;
+    node.map.x=Math.round(clamp(node.map.x,6.5,93.5)*10)/10;
+    node.map.y=Math.round(clamp(node.map.y,bounds.min,bounds.max)*10)/10;
+    if(Math.abs(node.map.x-oldX)>0.001 || Math.abs(node.map.y-oldY)>0.001){ changed=true; }
+  });
+  return changed;
+}
 function runReflowUpgradeNodes(){
   if(!runCampaign || !runCampaign.nodes) return false;
   var byStage={};
@@ -7830,8 +7922,13 @@ function runReflowUpgradeNodes(){
     ups.sort(function(a,b){ return (a.map.x||50) - (b.map.x||50); });
     var packMin=packs[0].map.x;
     var packMax=packs[packs.length-1].map.x;
+    var packAvgY=0;
+    for(var py=0; py<packs.length; py++){
+      packAvgY += (packs[py].map && typeof packs[py].map.y==='number') ? packs[py].map.y : runStageBaselineY(stage,false);
+    }
+    packAvgY = packAvgY / packs.length;
     var laneGap=clamp(15 + (stage*0.45), 15, 21);
-    var baseY=clamp(runStageY(stage,false)+4.9,8,95);
+    var baseY=clamp(packAvgY+3.8,8,95);
     var avoid=packs.slice();
     var roomLeft=packMin-8;
     var roomRight=92-packMax;
@@ -7860,6 +7957,7 @@ function runReflowUpgradeNodes(){
       }
     }
   });
+  if(runResolveMapNodeOverlaps()){ changed=true; }
   if(changed){ runSave(); }
   return changed;
 }
@@ -7893,10 +7991,13 @@ function runGenerateChoices(fromNodeId){
   }
 
   if(hasUpgrade){
+    var packAvgY=0;
+    for(var sy=0; sy<stageNodes.length; sy++){ packAvgY += stageNodes[sy].map.y; }
+    packAvgY = stageNodes.length ? (packAvgY / stageNodes.length) : runStageBaselineY(stage,false);
     var packMin=packXs.length ? Math.min.apply(Math, packXs) : clamp(parentX-7,8,92);
     var packMax=packXs.length ? Math.max.apply(Math, packXs) : clamp(parentX+7,8,92);
     var laneGap=clamp(15 + (stage*0.45), 15, 21);
-    var baseY=clamp(runStageY(stage,false)+4.9+((runRandom()*1.6)-0.8),8,95);
+    var baseY=clamp(packAvgY+3.8,8,95);
     var leftPref=clamp(packMin - laneGap - ((runRandom()*2)-1), 8, 92);
     var leftSpot=runFindOpenNodeSpot(leftPref, baseY, stageNodes, 8, clamp(packMin-3,8,92));
     var upLeft=runCreateUpgradeNode(stage, leftSpot.x, usedUpgrades, leftSpot.y);
@@ -8501,50 +8602,195 @@ function runObscuredNodeProfile(node, set){
   if(node && node.type==='boss') kind='boss';
   else if(node && node.type==='elite') kind='elite';
 
-  var titlePool={
-    pack:['Veiled Relay','Shrouded Channel','Ciphered Corridor','Silent Junction','Hidden Signal Chamber'],
-    elite:['Fracture Vault','Obsidian Relay','Rifted Archive','Ashen Channel','Sealed Crucible'],
-    boss:['Crown of Static','Null Throne','Cathedral of Noise','The Final Relay','Apex Interference Core']
+  var titlePartA={
+    pack:[
+      'Veiled','Shrouded','Ciphered','Silent','Hidden','Frayed','Hollow','Distant','Flickering','Umbral',
+      'Covert','Dustbound','Frozen','Mirrored','Wired','Forgotten','Echoing','Drifting','Obscured','Liminal',
+      'Nightglass','Stormbound','Pale','Rusted'
+    ],
+    elite:[
+      'Fractured','Obsidian','Rifted','Ashen','Sealed','Scarred','Warden','Crimson','Harsh','Ironbound',
+      'Forked','Razor','Abyssal','Cinder','Relentless','Overclocked','Shattered','Ruinforged','Ceremonial','Voidlocked'
+    ],
+    boss:[
+      'Final','Apex','Null','Eclipsed','Sovereign','Riven','Obsidian','Last','Broken','Crimson',
+      'Hollow','Ruined','Shattered','Forgotten','Iron','Voidbound','Stormwrought','Burnished','Silent','Terminal'
+    ]
   };
+  var titlePartB={
+    pack:[
+      'Relay','Channel','Corridor','Junction','Signal Chamber','Conduit','Span','Switchyard','Transit','Archive',
+      'Array','Gate','Passage','Nexus','Bridge','Crossline','Waypoint','Control Spine','Loop','Terminus',
+      'Driftway','Vault','Runway','Receiver'
+    ],
+    elite:[
+      'Vault','Relay','Archive','Crucible','Conduit','Forge','Stronghold','Engine','Spire','Bastion',
+      'Labyrinth','Abyss','Battery','Killbox','Core','Watchtower','Garrison','Trench','Anvil','Citadel',
+      'Signal Crown','Pressure Gate'
+    ],
+    boss:[
+      'Throne','Cathedral','Relay','Core','Citadel','Monolith','Archive','Engine','Crown','Bastion',
+      'Spire','Gate','Vault','Pillar','Crucible','Sanctum'
+    ]
+  };
+  var titleBossTail=[
+    'of Static','of Noise','of Interference','of the Null Signal','of Broken Stars','of Redacted Hours',
+    'of Collapse','of Endless Echo','of the Last Channel','of Blackout Light','of Severed Guidance',
+    'of the Final Relay','of Burnt Signals','of Dead Frequencies','of the Hollow Storm','of Masked Thunder'
+  ];
   var descLeadPool={
-    pack:['Scanners return only fragments from this corridor.','The channel hums behind layered static.','Archive ciphers mask whatever waits inside.'],
-    elite:['Elite telemetry is fractured and hostile.','A high-voltage signature leaks from this vault.','The relay core spits redacted spikes into the feed.'],
-    boss:['All sensors collapse near this signal crown.','The final relay radiates blackout-class interference.','The chamber ahead distorts every reading into noise.']
+    pack:[
+      'Scanners return only fragments from this corridor.',
+      'The channel hums behind layered static.',
+      'Archive ciphers mask whatever waits inside.',
+      'Telemetry arrives in clipped, contradictory bursts.',
+      'A faint signal trail vanishes at this threshold.',
+      'This route appears mapped, then rewrites itself.',
+      'The feed reports structure, but no stable pattern.',
+      'Residual packets imply prior traffic and abrupt silence.',
+      'Signal ghosts cluster around this waypoint.',
+      'Every reading here looks one step out of phase.',
+      'Low-band chatter loops without a source.',
+      'This section answers scans with incomplete echoes.'
+    ],
+    elite:[
+      'Elite telemetry is fractured and hostile.',
+      'A high-voltage signature leaks from this vault.',
+      'The relay core spits redacted spikes into the feed.',
+      'Combat logs flag this lane as volatile and punitive.',
+      'Sensor bands distort near the elite channel spine.',
+      'This vault emits staggered pulses and false landmarks.',
+      'Guidance overlays fail repeatedly in this zone.',
+      'Recorded routes diverge the closer you get.',
+      'The system marks this sector as high-resistance.',
+      'Signal pressure rises sharply at this entry point.',
+      'This path rejects passive reads and stable forecasts.',
+      'The feed degrades into jagged bursts near this node.'
+    ],
+    boss:[
+      'All sensors collapse near this signal crown.',
+      'The final relay radiates blackout-class interference.',
+      'The chamber ahead distorts every reading into noise.',
+      'Long-range scans fail within moments of lock.',
+      'This throne zone bends telemetry into static bloom.',
+      'The apex chamber broadcasts a suppressive carrier.',
+      'Routing maps erase themselves near this gate.',
+      'Every instrument reports overload at the boundary.',
+      'The final channel answers with deliberate silence.',
+      'No stable model survives contact with this core.',
+      'Signal architecture folds inward around this node.',
+      'This entry point saturates all known warning bands.'
+    ]
   };
   var detailA=[
     'Ancient routing marks imply multiple trial chambers',
     'Residual traces suggest shifting rules and unstable guidance',
     'Observers note that certainty decays quickly here',
-    'Only fragments of prior runs can be recovered'
+    'Only fragments of prior runs can be recovered',
+    'The topology appears stable until a guess commits',
+    'Dead channels still carry faint procedural residue',
+    'Recovered notes mention delayed penalties and false openings',
+    'Route indicators drift between passes without warning',
+    'Telemetry suggests layered constraints beneath the visible rules',
+    'Prior entrants logged abrupt pattern reversals',
+    'Scans show intermittent locks on key pathways',
+    'The lane appears to punish repetitive sequencing',
+    'Remnant tags indicate competing signal priorities',
+    'This sector preserves mistakes longer than expected',
+    'The path records intent, not only outcome',
+    'A stale guidance mesh interferes with fresh reads'
   ];
   var detailB=[
     'the path demands adaptation over planning',
     'survival hinges on reading weak patterns in the storm',
     'the corridor favors disciplined, flexible runs',
-    'reckless pushes are often punished without warning'
+    'reckless pushes are often punished without warning',
+    'small corrections outperform bold commitments here',
+    'timing decisions matter as much as raw accuracy',
+    'overconfidence compounds into avoidable losses',
+    'progress usually comes from controlled, deliberate probes',
+    'hesitation can be costly, but panic is worse',
+    'the cleanest route is rarely the obvious one',
+    'the system rewards consistency under pressure',
+    'narrow windows close fast once exposed',
+    'improvisation helps only when grounded in signal context',
+    'misreads tend to cascade if left unchecked',
+    'stability returns only after careful recalibration',
+    'the node resists brute-force momentum'
   ];
   var omenByTier={
-    calm:['Interference is present but restrained.','The node feels quiet, but not safe.'],
-    rough:['Telemetry jitters in sharp bursts.','Warning signs suggest an uneven, punishing signal.'],
-    brutal:['Blackout-grade pressure detected.','Readings indicate severe interference and high failure risk.']
+    calm:[
+      'Interference is present but restrained.',
+      'The node feels quiet, but not safe.',
+      'Baseline turbulence detected with low aggression.',
+      'Readings are steady enough to plan around.',
+      'Pressure remains moderate for now.',
+      'The signal holds a cautious, watchful tone.',
+      'The lane appears stable with minor distortions.',
+      'Ambient noise is manageable but persistent.'
+    ],
+    rough:[
+      'Telemetry jitters in sharp bursts.',
+      'Warning signs suggest an uneven, punishing signal.',
+      'Noise spikes point to volatile rule shifts.',
+      'This channel trends hostile under sustained pressure.',
+      'Forecast confidence drops in repeated cycles.',
+      'Instability signatures are rising across the lane.',
+      'The feed suggests sharp penalties for sloppy lines.',
+      'Signal turbulence may escalate mid-run.'
+    ],
+    brutal:[
+      'Blackout-grade pressure detected.',
+      'Readings indicate severe interference and high failure risk.',
+      'Failure probability rises sharply under sustained load.',
+      'The system reports critical hostility in this corridor.',
+      'All metrics flag extreme disruption potential.',
+      'This node is operating beyond safe tolerances.',
+      'Warning: severe collapse behavior likely.',
+      'Expect relentless disruption from entry onward.'
+    ]
   };
   var signaturePool=[
     'Cipher lock: unresolved',
     'Signal class: redacted',
     'Forecast: non-deterministic',
     'Access stamp: quarantined',
-    'Route map: obscured'
+    'Route map: obscured',
+    'Integrity check: partial',
+    'Transit profile: unstable',
+    'Entry key: fragmented',
+    'Carrier tone: masked',
+    'Telemetry band: disputed',
+    'Relay health: degraded',
+    'Path checksum: inconsistent',
+    'Signal drift: elevated',
+    'Traceability: low confidence',
+    'Archive stamp: suppressed'
   ];
-  var title=runLorePick(seed, titlePool[kind] || titlePool.pack, 0) || 'Unknown Node';
+  var title='';
+  if(kind==='boss'){
+    var bossA=runLorePick(seed, titlePartA.boss, 0);
+    var bossB=runLorePick(seed, titlePartB.boss, 5);
+    var bossTail=runLorePick(seed, titleBossTail, 13);
+    title=((bossA || 'Apex')+' '+(bossB || 'Core')+' '+(bossTail || 'of Interference')).trim();
+  }else{
+    var nodeA=runLorePick(seed, titlePartA[kind] || titlePartA.pack, 0);
+    var nodeB=runLorePick(seed, titlePartB[kind] || titlePartB.pack, 5);
+    title=((nodeA || 'Veiled')+' '+(nodeB || 'Relay')).trim();
+  }
   var lead=runLorePick(seed, descLeadPool[kind] || descLeadPool.pack, 3);
   var a=runLorePick(seed, detailA, 7);
   var b=runLorePick(seed, detailB, 11);
   var omen=runLorePick(seed, omenByTier[hint.tier] || omenByTier.calm, 17);
   var signature=runLorePick(seed, signaturePool, 23);
-  var desc=(lead ? (lead+' ') : '') + (a ? (a+', ') : '') + (b || '') + (omen ? (' '+omen) : '');
+  var core='';
+  if(a && b){ core=a+'; '+b+'.'; }
+  else if(a){ core=a+'.'; }
+  else if(b){ core=b+'.'; }
+  var desc=(lead ? (lead+' ') : '') + core + (omen ? (' '+omen) : '');
   return {
     title:title,
-    desc:desc || 'Node intel is encrypted until entry.',
+    desc:desc.trim() || 'Node intel is encrypted until entry.',
     intel:(a && b) ? (a+'. '+b+'.') : 'Intel remains partial and heavily redacted.',
     signature:signature || 'Signal class: redacted',
     omen:omen || hint.text
@@ -9003,9 +9249,24 @@ function runRenderCampaignMutatorTray(){
   }
   var set=getCampaignSet(activeCampaign.setId);
   var node=runResolveNodeForSet(set||null);
-  var mut=(state.campaignMutators && typeof state.campaignMutators==='object') ? state.campaignMutators : ((set && set.mutators) ? set.mutators : null);
+  var detailsVisible=runNodeDetailsRevealed(node, set || {id:activeCampaign.setId,nodeId:activeCampaign.nodeId});
+  var stateMut=(state.campaignMutators && typeof state.campaignMutators==='object') ? state.campaignMutators : null;
+  var setMut=((set && set.mutators) ? set.mutators : null);
+  var mut=stateMut || setMut;
   var list=describeMutators(mut);
+  // During node entry, state mutators may still be the previous/default set for one render pass.
+  if(!list.length && setMut && mut!==setMut){
+    mut=setMut;
+    list=describeMutators(mut);
+  }
   var hint=runMutatorThreatHint(mut, displayDifficulty(set||node||{}), node ? node.type : 'pack');
+  if(detailsVisible && hint && hint.badge==='UNKNOWN'){
+    hint={
+      tier:'calm',
+      badge:'',
+      text:list.length ? 'Modifier details loaded for this node.' : 'No mutators active on this node.'
+    };
+  }
   var summary=(list.length>0) ? ('Modifiers: '+list.length) : 'No active modifiers';
   if(hint && hint.badge && hint.badge!=='UNKNOWN'){ summary += ' | ' + hint.badge; }
   if(campaignMutatorSummaryEl){
