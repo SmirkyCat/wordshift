@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'wordshift-pwa-v3';
+const CACHE_VERSION = 'wordshift-pwa-v4';
 const APP_SHELL = [
   './Wordshift.html',
   './multiplayer.js',
