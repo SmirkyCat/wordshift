@@ -4752,7 +4752,7 @@ function runLoadWordReviewFromFile(opts){
 
   try{
     return fetch(reqUrl,{mode:'cors',cache:'no-store'}).then(function(res){
-      if(!res.ok) throw new Error('HTTP '+res.status);
+      if(!res.ok) throw new Error('HTTP '+res.status+' at '+url);
       return res.text();
     }).then(function(text){
       var parsed=JSON.parse(String(text||'{}'));
@@ -4998,6 +4998,7 @@ function runRenderWordReview(forceNext){
 }
 function openWordReviewModal(){
   if(!wordReviewModal) return;
+  runUpdateWordReviewControls();
   runWordReviewBatch=[];
   runRenderWordReview(true);
   wordReviewModal.classList.add('open');
@@ -5385,7 +5386,7 @@ function runWordReviewSyncStateText(){
 }
 async function runBindWordReviewFile(){
   if(!window.isSecureContext || !window.showOpenFilePicker){
-    toast('Direct file writing is not supported here; cloud sync will be used if available.');
+    toast('Direct file writing is not supported here. Use Save Now for cloud sync.');
     return false;
   }
   try{
@@ -5473,7 +5474,7 @@ async function runSaveWordReviewToRemote(opts){
   opts=opts || {};
   var url=String(runWordReviewWriteUrl||'').trim();
   if(!runWordReviewRemoteWritable()){
-    if(!opts.silent) toast('No remote word review API is configured.');
+    if(!opts.silent) toast('Cloud API not configured. Expected '+runWordReviewWriteUrl);
     return false;
   }
   try{
@@ -5489,7 +5490,7 @@ async function runSaveWordReviewToRemote(opts){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(payload)
     });
-    if(!res.ok) throw new Error('HTTP '+res.status);
+    if(!res.ok) throw new Error('HTTP '+res.status+' at '+url);
     var text=await res.text();
     var parsed=payload;
     if(text && String(text).trim()){
@@ -5522,6 +5523,16 @@ function runSetWordReviewFileUrl(url){
   if(/\/\.netlify\/functions\/word-review(?:\?|$)/i.test(runWordReviewFileUrl)){
     runWordReviewWriteUrl=runWordReviewFileUrl;
     save(RUN_WORD_REVIEW_WRITE_KEY, runWordReviewWriteUrl);
+  }
+}
+function runUpdateWordReviewControls(){
+  var supportsFile=!!(window.isSecureContext && window.showOpenFilePicker);
+  if(wrBindFileBtn){
+    wrBindFileBtn.style.display = supportsFile ? '' : 'none';
+  }
+  if(wrSaveFileBtn){
+    wrSaveFileBtn.textContent = supportsFile ? 'Save Now' : 'Save to Cloud';
+    wrSaveFileBtn.title = supportsFile ? '' : 'Direct file write unsupported on this browser; saves via cloud API.';
   }
 }
 function runWordReviewStatus(word){
@@ -7791,6 +7802,7 @@ if(hotseatLobby){
     if(e.target.id==='hotseatLobby') closeHotseatLobby();
   });
 }
+runUpdateWordReviewControls();
 if(wrCloseBtn){ wrCloseBtn.addEventListener('click', closeWordReviewModal); }
 if(wrListEl){
   wrListEl.addEventListener('click', function(e){
@@ -8123,6 +8135,7 @@ window.addEventListener('beforeunload', function(){
 </script>
 </body>
 </html>
+
 
 
 
