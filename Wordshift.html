@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -4752,7 +4752,25 @@ function runLoadWordReviewFromFile(opts){
 
   try{
     return fetch(reqUrl,{mode:'cors',cache:'no-store'}).then(function(res){
-      if(!res.ok) throw new Error('HTTP '+res.status+' at '+url);
+      if(!res.ok){
+        return res.text().then(function(body){
+          var msg='HTTP '+res.status+' at '+url;
+          if(body){
+            try{
+              var parsed=JSON.parse(body);
+              if(parsed && (parsed.error || parsed.hint)){
+                msg += ' - ' + (parsed.error || 'request failed');
+                if(parsed.hint) msg += ' ('+parsed.hint+')';
+              }else{
+                msg += ' - ' + body.slice(0,180);
+              }
+            }catch(_){
+              msg += ' - ' + String(body).slice(0,180);
+            }
+          }
+          throw new Error(msg);
+        });
+      }
       return res.text();
     }).then(function(text){
       var parsed=JSON.parse(String(text||'{}'));
@@ -5490,7 +5508,24 @@ async function runSaveWordReviewToRemote(opts){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(payload)
     });
-    if(!res.ok) throw new Error('HTTP '+res.status+' at '+url);
+    if(!res.ok){
+      var body=await res.text();
+      var msg='HTTP '+res.status+' at '+url;
+      if(body){
+        try{
+          var parsedErr=JSON.parse(body);
+          if(parsedErr && (parsedErr.error || parsedErr.hint)){
+            msg += ' - ' + (parsedErr.error || 'request failed');
+            if(parsedErr.hint) msg += ' ('+parsedErr.hint+')';
+          }else{
+            msg += ' - ' + body.slice(0,180);
+          }
+        }catch(_){
+          msg += ' - ' + String(body).slice(0,180);
+        }
+      }
+      throw new Error(msg);
+    }
     var text=await res.text();
     var parsed=payload;
     if(text && String(text).trim()){

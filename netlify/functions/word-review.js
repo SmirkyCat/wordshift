@@ -1,8 +1,5 @@
-﻿'use strict';
+'use strict';
 
-const { getStore } = require('@netlify/blobs');
-
-const store = getStore('wordshift-data');
 const KEY = 'campaign_words';
 
 function json(statusCode, data) {
@@ -57,11 +54,34 @@ function normalizePayload(raw) {
   };
 }
 
-exports.handler = async (event) => {
+async function resolveStore(context) {
+  // Prefer runtime-provided blobs when available.
+  if (context && context.blobs && typeof context.blobs.getStore === 'function') {
+    return context.blobs.getStore('wordshift-data');
+  }
+
+  // Fallback to SDK import at runtime (not module top-level) so failures return JSON instead of hard 502.
+  let mod = null;
+  try {
+    mod = await import('@netlify/blobs');
+  } catch (e) {
+    throw new Error('Cannot load @netlify/blobs: ' + String((e && e.message) || e || 'unknown'));
+  }
+
+  if (!mod || typeof mod.getStore !== 'function') {
+    throw new Error('@netlify/blobs loaded but getStore is unavailable');
+  }
+
+  return mod.getStore('wordshift-data');
+}
+
+exports.handler = async (event, context) => {
   try {
     if (event.httpMethod === 'OPTIONS') {
       return json(200, { ok: true });
     }
+
+    const store = await resolveStore(context);
 
     if (event.httpMethod === 'GET') {
       const stored = await store.get(KEY, { type: 'json' });
@@ -87,6 +107,9 @@ exports.handler = async (event) => {
 
     return json(405, { error: 'Method not allowed' });
   } catch (error) {
-    return json(500, { error: String((error && error.message) || error || 'Unknown error') });
+    return json(500, {
+      error: String((error && error.message) || error || 'Unknown error'),
+      hint: 'Check Netlify function logs and ensure Blobs is available for this site.'
+    });
   }
 };
