@@ -7530,12 +7530,14 @@ function runCreatePackNode(arch, packStage, slot, isBoss, opts){
   runCampaign.nodes[id]=node;
   return node;
 }
-function runCreateUpgradeNode(packStage, mapX, usedUpgrades){
+function runCreateUpgradeNode(packStage, mapX, usedUpgrades, mapY){
   var upId=runPickUpgradeId(usedUpgrades);
   var up=runGetUpgrade(upId);
   var id=runNextNodeId();
   var x=(typeof mapX==='number' && isFinite(mapX)) ? clamp(mapX,8,92) : 50;
-  var y=clamp(runStageY(packStage,false)+2.4+((runRandom()*1.8)-0.9),8,95);
+  var y=(typeof mapY==='number' && isFinite(mapY))
+    ? clamp(mapY,8,95)
+    : clamp(runStageY(packStage,false)+2.4+((runRandom()*1.8)-0.9),8,95);
   var node={
     id:id,
     type:'upgrade',
@@ -7587,6 +7589,104 @@ function runEliteSlotForStage(stage, branchCount){
   }
   return -1;
 }
+function runNodeOverlapPenaltyAt(x, y, node){
+  if(!node || !node.map) return 0;
+  var nx=(typeof node.map.x==='number' && isFinite(node.map.x)) ? node.map.x : 50;
+  var ny=(typeof node.map.y==='number' && isFinite(node.map.y)) ? node.map.y : 50;
+  var dx=Math.abs(x - nx);
+  var dy=Math.abs(y - ny);
+  var xPad=(node.type==='upgrade') ? 10.4 : 12.0;
+  var yPad=(node.type==='upgrade') ? 4.8 : 5.8;
+  var px=Math.max(0, xPad - dx);
+  var py=Math.max(0, yPad - dy);
+  if(px<=0 || py<=0) return 0;
+  return px * py;
+}
+function runFindOpenNodeSpot(preferredX, preferredY, avoidNodes, xMin, xMax){
+  var minX=clamp((typeof xMin==='number' && isFinite(xMin)) ? xMin : 8, 8, 92);
+  var maxX=clamp((typeof xMax==='number' && isFinite(xMax)) ? xMax : 92, 8, 92);
+  if(maxX<minX){
+    var tmp=minX; minX=maxX; maxX=tmp;
+  }
+  if((maxX-minX)<0.6){ minX=8; maxX=92; }
+  var prefX=clamp((typeof preferredX==='number' && isFinite(preferredX)) ? preferredX : 50, minX, maxX);
+  var prefY=clamp((typeof preferredY==='number' && isFinite(preferredY)) ? preferredY : 50, 8, 95);
+  var yOffsets=[0,-1.4,1.4,-2.8,2.8];
+  var best={x:prefX,y:prefY,score:Infinity};
+  var nodes=Array.isArray(avoidNodes) ? avoidNodes : [];
+  for(var yi=0; yi<yOffsets.length; yi++){
+    var y=clamp(prefY + yOffsets[yi], 8, 95);
+    for(var x=minX; x<=maxX+0.001; x+=0.5){
+      var score=(Math.abs(x-prefX)*0.06) + (Math.abs(y-prefY)*0.14);
+      for(var i=0;i<nodes.length;i++){
+        score += runNodeOverlapPenaltyAt(x,y,nodes[i]);
+      }
+      if(score<best.score){
+        best={x:x,y:y,score:score};
+      }
+    }
+  }
+  return {
+    x:Math.round(best.x*10)/10,
+    y:Math.round(best.y*10)/10
+  };
+}
+function runReflowUpgradeNodes(){
+  if(!runCampaign || !runCampaign.nodes) return false;
+  var byStage={};
+  Object.keys(runCampaign.nodes).forEach(function(id){
+    var node=runCampaign.nodes[id];
+    if(!node || typeof node.packStage!=='number') return;
+    if(node.type!=='upgrade' && !runIsPackNodeType(node.type)) return;
+    var key=''+node.packStage;
+    if(!byStage[key]) byStage[key]={packs:[], upgrades:[]};
+    if(node.type==='upgrade') byStage[key].upgrades.push(node);
+    else byStage[key].packs.push(node);
+  });
+  var changed=false;
+  Object.keys(byStage).forEach(function(stageKey){
+    var stage=safeInt(stageKey, 1);
+    var group=byStage[stageKey];
+    var packs=group.packs || [];
+    var ups=group.upgrades || [];
+    if(!packs.length || !ups.length) return;
+    packs.sort(function(a,b){ return (a.map.x||50) - (b.map.x||50); });
+    ups.sort(function(a,b){ return (a.map.x||50) - (b.map.x||50); });
+    var packMin=packs[0].map.x;
+    var packMax=packs[packs.length-1].map.x;
+    var laneGap=clamp(13 + (stage*0.35), 13, 18);
+    var baseY=clamp(runStageY(stage,false)+3.8,8,95);
+    var avoid=packs.slice();
+    var roomLeft=packMin-8;
+    var roomRight=92-packMax;
+    var singleGoesLeft=(roomLeft>=roomRight);
+    for(var i=0;i<ups.length;i++){
+      var up=ups[i];
+      var side='right';
+      if(ups.length===1){
+        side=singleGoesLeft ? 'left' : 'right';
+      }else{
+        side=(i===0) ? 'left' : 'right';
+      }
+      var prefX=(side==='left')
+        ? clamp(packMin-laneGap, 8, 92)
+        : clamp(packMax+laneGap, 8, 92);
+      var spot=(side==='left')
+        ? runFindOpenNodeSpot(prefX, baseY, avoid, 8, clamp(packMin-3,8,92))
+        : runFindOpenNodeSpot(prefX, baseY, avoid, clamp(packMax+3,8,92), 92);
+      avoid.push({type:'upgrade', map:{x:spot.x,y:spot.y}});
+      var oldX=(up.map && typeof up.map.x==='number') ? up.map.x : 50;
+      var oldY=(up.map && typeof up.map.y==='number') ? up.map.y : 50;
+      if(Math.abs(oldX-spot.x)>0.25 || Math.abs(oldY-spot.y)>0.25){
+        up.map.x=spot.x;
+        up.map.y=spot.y;
+        changed=true;
+      }
+    }
+  });
+  if(changed){ runSave(); }
+  return changed;
+}
 function runGenerateChoices(fromNodeId){
   var stage=runCampaign.depth+1;
   var fromNode=runCampaign.nodes[fromNodeId] || null;
@@ -7601,6 +7701,8 @@ function runGenerateChoices(fromNodeId){
   var usedUpgrades={};
   var frontier=[];
   var eliteSlot=runEliteSlotForStage(stage, branchCount);
+  var stageNodes=[];
+  var packXs=[];
 
   for(var i=0;i<branchCount;i++){
     var mapX=runPackX(i, branchCount, parentX, stage);
@@ -7610,13 +7712,25 @@ function runGenerateChoices(fromNodeId){
     });
     runAddLink(fromNodeId, node.id);
     frontier.push(node.id);
+    stageNodes.push(node);
+    packXs.push(node.map.x);
   }
 
   if(hasUpgrade){
-    var upLeft=runCreateUpgradeNode(stage, clamp(parentX-9+((runRandom()*5)-2.5),8,92), usedUpgrades);
+    var packMin=packXs.length ? Math.min.apply(Math, packXs) : clamp(parentX-7,8,92);
+    var packMax=packXs.length ? Math.max.apply(Math, packXs) : clamp(parentX+7,8,92);
+    var laneGap=clamp(13 + (stage*0.35), 13, 18);
+    var baseY=clamp(runStageY(stage,false)+3.8+((runRandom()*1.2)-0.6),8,95);
+    var leftPref=clamp(packMin - laneGap - ((runRandom()*2)-1), 8, 92);
+    var leftSpot=runFindOpenNodeSpot(leftPref, baseY, stageNodes, 8, clamp(packMin-3,8,92));
+    var upLeft=runCreateUpgradeNode(stage, leftSpot.x, usedUpgrades, leftSpot.y);
     usedUpgrades[upLeft.upgradeId]=true;
-    var upRight=runCreateUpgradeNode(stage, clamp(parentX+9+((runRandom()*5)-2.5),8,92), usedUpgrades);
+    stageNodes.push(upLeft);
+    var rightPref=clamp(packMax + laneGap + ((runRandom()*2)-1), 8, 92);
+    var rightSpot=runFindOpenNodeSpot(rightPref, baseY, stageNodes, clamp(packMax+3,8,92), 92);
+    var upRight=runCreateUpgradeNode(stage, rightSpot.x, usedUpgrades, rightSpot.y);
     usedUpgrades[upRight.upgradeId]=true;
+    stageNodes.push(upRight);
     runAddLink(fromNodeId,upLeft.id);
     runAddLink(fromNodeId,upRight.id);
     frontier.push(upLeft.id, upRight.id);
@@ -8627,6 +8741,7 @@ function runRenderCampaignMutatorTray(){
 }
 function buildCampaignMenu(){
   ensureRunCampaign();
+  runReflowUpgradeNodes();
   if(!campaignNodesEl || !campaignSvg) return;
   if(campaignMapEl){ campaignMapEl.style.setProperty('--cluster-hue', runClusterHueDeg(runCampaign.cluster)+'deg'); }
   var mapSub=$('.map-sub');
