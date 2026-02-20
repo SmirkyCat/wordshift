@@ -387,6 +387,28 @@ html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),var(-
 .menu-btn:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.3), 0 1px 0 rgba(255,255,255,.12) inset}
 .menu-btn:active{transform:translateY(0) scale(.98)}
 .menu-note{font-size:.9rem;color:var(--muted);margin:12px 0 0}
+.menu-top-toast{
+  display:none;
+  margin:0 0 12px;
+  padding:10px 12px;
+  border-radius:12px;
+  font-size:.76rem;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  font-weight:800;
+  color:#ffe2bf;
+  background:linear-gradient(135deg,rgba(86,44,18,.9),rgba(48,23,9,.92));
+  border:1px solid rgba(255,176,92,.58);
+  box-shadow:0 10px 28px rgba(0,0,0,.38), 0 0 0 1px rgba(255,235,210,.08) inset;
+}
+.menu-top-toast.show{
+  display:block;
+  animation:menuWarnPulse 1.8s ease-in-out infinite;
+}
+@keyframes menuWarnPulse{
+  0%,100%{transform:translateY(0);filter:brightness(1)}
+  50%{transform:translateY(-1px);filter:brightness(1.08)}
+}
 body.mode-campaign header .controls{display:none}
 body.mode-campaign #btnDiag{display:none}
 body.mode-campaign #btnMenu{display:inline-flex}
@@ -1336,6 +1358,7 @@ button.primary.disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.1)}
 <canvas id="confetti"></canvas>
 <div id="menuScreen" class="screen active">
   <div class="menu-card">
+    <div class="menu-top-toast" id="menuDarkReaderWarning" role="status" aria-live="polite" hidden>[!] Dark Reader appears enabled. Theme colors may look wrong.</div>
     <div class="menu-title">WORDSHIFT</div>
     <p class="menu-sub">Pick a mode.</p>
     <div class="menu-actions">
@@ -1761,11 +1784,11 @@ button.primary.disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.1)}
       <label>Clear sandbox session</label>
       <button class="secondary" id="optClearSandbox">Clear</button>
     </div>
-    <div class="row">
+    <div class="row" id="optWordReviewUrlRow">
       <label for="optWordReviewUrl">Campaign word file URL</label>
       <input id="optWordReviewUrl" type="text" placeholder="campaign_words.json">
     </div>
-    <div class="row">
+    <div class="row" id="optWordReviewReloadRow">
       <label>Reload campaign word file</label>
       <button class="secondary" id="optWordReviewReload">Reload</button>
     </div>
@@ -5240,6 +5263,7 @@ var campaignMapEl=$('#campaignMap');
 var campaignNodesEl=$('#campaignNodes');
 var campaignSvg=$('#campaignSvg');
 var campaignPanEl=$('#campaignPan');
+var menuDarkReaderWarning=$('#menuDarkReaderWarning');
 var menuBtn=$('#btnMenu');
 var menuFsBtn=$('#btnMenuFS');
 var coinDisplay=$('#coinDisplay');
@@ -5264,6 +5288,8 @@ var optReviewKey=$('#optReviewKey');
 var optReviewAuthBtn=$('#optReviewAuth');
 var optReviewLogoutBtn=$('#optReviewLogout');
 var optReviewAuthState=$('#optReviewAuthState');
+var optWordReviewUrlRow=$('#optWordReviewUrlRow');
+var optWordReviewReloadRow=$('#optWordReviewReloadRow');
 var runWordReviewBatch=[];
 var runWordReviewLoading=false;
 var runWordReviewNeedsInitialLoad=true;
@@ -5485,6 +5511,37 @@ function runWordReviewRemoteWritable(){
   if(/^\/\.netlify\/functions\/word-review(?:\?|$)/i.test(u)) return true;
   return /^https?:\/\/[^\s]+\/\.netlify\/functions\/word-review(?:\?|$)/i.test(u);
 }
+var runDarkReaderObserver=null;
+function runDetectDarkReaderEnabled(){
+  try{
+    var root=document.documentElement;
+    if(root && (root.hasAttribute('data-darkreader-mode') || root.hasAttribute('data-darkreader-scheme'))) return true;
+    if(document.querySelector('style.darkreader, style.darkreader--sync, style.darkreader--fallback, style.darkreader--user-agent, link.darkreader, meta[name="darkreader"]')) return true;
+    var body=document.body;
+    if(body && (body.classList.contains('darkreader') || body.classList.contains('darkreader--fallback'))) return true;
+  }catch(_){ }
+  return false;
+}
+function runUpdateDarkReaderMenuWarning(){
+  if(!menuDarkReaderWarning || !menuScreen) return;
+  var enabled=runDetectDarkReaderEnabled();
+  var show=!!(enabled && menuScreen.classList.contains('active'));
+  menuDarkReaderWarning.hidden=!show;
+  menuDarkReaderWarning.classList.toggle('show', show);
+  menuDarkReaderWarning.title=show ? 'Dark Reader is active for this page. Disable it for original Wordshift colors.' : '';
+}
+function runEnsureDarkReaderObserver(){
+  if(runDarkReaderObserver || typeof MutationObserver==='undefined') return;
+  try{
+    runDarkReaderObserver=new MutationObserver(function(){ runUpdateDarkReaderMenuWarning(); });
+    if(document.documentElement){
+      runDarkReaderObserver.observe(document.documentElement, {attributes:true, attributeFilter:['data-darkreader-mode','data-darkreader-scheme','class']});
+    }
+    if(document.head){
+      runDarkReaderObserver.observe(document.head, {childList:true, subtree:true});
+    }
+  }catch(_){ }
+}
 function runWordReviewAuthHeaders(key, includeContentType){
   var out={};
   if(includeContentType){ out['Content-Type']='application/json'; }
@@ -5498,6 +5555,17 @@ function runUpdatePrivateAccessUI(){
     wordReviewBtn.style.display = authed ? '' : 'none';
     wordReviewBtn.disabled = !authed;
     wordReviewBtn.title = authed ? 'Campaign word review unlocked' : 'Authenticate in Options to unlock Campaign Words';
+  }
+  var privateRowDisplay=authed ? '' : 'none';
+  if(optWordReviewUrlRow){ optWordReviewUrlRow.style.display=privateRowDisplay; }
+  if(optWordReviewReloadRow){ optWordReviewReloadRow.style.display=privateRowDisplay; }
+  if(typeof optWordReviewUrl!=='undefined' && optWordReviewUrl){
+    optWordReviewUrl.disabled=!authed;
+    optWordReviewUrl.title = authed ? '' : 'Authenticate in Options first.';
+  }
+  if(typeof optWordReviewReload!=='undefined' && optWordReviewReload){
+    optWordReviewReload.disabled=!authed;
+    optWordReviewReload.title = authed ? '' : 'Authenticate in Options first.';
   }
   if(optReviewAuthState){
     optReviewAuthState.textContent = authed ? 'Authenticated' : 'Locked';
@@ -7875,6 +7943,7 @@ function showMenu(){
   buildCampaignMenu();
   resetKeyboardLayout();
   updateCampaignProgress();
+  runUpdateDarkReaderMenuWarning();
 }
 
 function openOptions(){
@@ -8063,6 +8132,11 @@ var optWordReviewUrl=$('#optWordReviewUrl');
 var optWordReviewReload=$('#optWordReviewReload');
 if(optWordReviewReload){
   optWordReviewReload.addEventListener('click', function(){
+    if(!runWordReviewAuthed){
+      toast('Authenticate in Options before editing campaign words.');
+      runUpdateWordReviewControls();
+      return;
+    }
     var nextUrl=optWordReviewUrl ? optWordReviewUrl.value : runWordReviewFileUrl;
     runSetWordReviewFileUrl(nextUrl);
     runWordReviewLoading=true;
@@ -8076,6 +8150,12 @@ if(optWordReviewReload){
 }
 if(optWordReviewUrl){
   optWordReviewUrl.addEventListener('change', function(){
+    if(!runWordReviewAuthed){
+      optWordReviewUrl.value=runWordReviewFileUrl;
+      toast('Authenticate in Options before editing campaign words.');
+      runUpdateWordReviewControls();
+      return;
+    }
     runSetWordReviewFileUrl(optWordReviewUrl.value);
   });
 }
@@ -8174,7 +8254,9 @@ if(runWordReviewAuthKey){
   runUpdateWordReviewControls();
 }
 buildCampaignMenu();
+runEnsureDarkReaderObserver();
 showMenu();
+runUpdateDarkReaderMenuWarning();
 runLoadWordReviewFromFile({silent:true});
 if(campaignPanEl){
   (function(){
