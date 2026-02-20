@@ -1,9 +1,5 @@
 import { handleWordReview } from "./_lib/word-review.js";
 import { json } from "./_lib/multiplayer-shared.js";
-import { LobbyDirectoryDO } from "./_lib/multiplayer-directory.js";
-import { LobbyRoomDO } from "./_lib/multiplayer-room.js";
-
-export { LobbyDirectoryDO, LobbyRoomDO };
 
 export default {
   async fetch(request, env) {

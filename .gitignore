@@ -3,3 +3,11 @@ CLOUDFLARE_SETUP.md
 AGENTS.md
 WORDSHIFT_INDEX.md
 *INSTRUCTIONS*.md
+
+# Dependencies
+node_modules/
+
+# Cloudflare local artifacts
+.wrangler/
+.dev.vars
+.dev.vars.*

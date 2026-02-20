@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "cf:dev": "wrangler pages dev .",
-    "cf:deploy": "wrangler pages deploy ."
+    "cf:deploy": "wrangler pages deploy .",
+    "cf:deploy:lobbies": "wrangler deploy --config wrangler.lobbies.jsonc"
   },
   "dependencies": {
     "@netlify/blobs": "^8.2.0"
