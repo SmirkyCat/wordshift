@@ -8471,15 +8471,90 @@ function runMutatorThreatHint(mut, displayDiff, nodeType){
   }
   return {tier:'calm', badge:'UNKNOWN', text:'Mutator intel is hidden until entry.'};
 }
+function runNodeLoreSeed(node, set){
+  var src='';
+  if(node){
+    src += String(node.id || '');
+    src += '|';
+    src += String(node.title || '');
+    src += '|';
+    src += String(node.type || '');
+  }
+  src += '|';
+  if(set){ src += String(set.id || ''); }
+  var h=2166136261;
+  for(var i=0;i<src.length;i++){
+    h ^= src.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h>>>0);
+}
+function runLorePick(seed, list, offset){
+  if(!Array.isArray(list) || !list.length) return '';
+  var idx=Math.abs((safeInt(seed,0) + safeInt(offset,0)) % list.length);
+  return list[idx];
+}
+function runObscuredNodeProfile(node, set){
+  var hint=runMutatorThreatHint(set ? set.mutators : null, displayDifficulty(set||node||{}), node ? node.type : 'pack');
+  var seed=runNodeLoreSeed(node, set);
+  var kind='pack';
+  if(node && node.type==='boss') kind='boss';
+  else if(node && node.type==='elite') kind='elite';
+
+  var titlePool={
+    pack:['Veiled Relay','Shrouded Channel','Ciphered Corridor','Silent Junction','Hidden Signal Chamber'],
+    elite:['Fracture Vault','Obsidian Relay','Rifted Archive','Ashen Channel','Sealed Crucible'],
+    boss:['Crown of Static','Null Throne','Cathedral of Noise','The Final Relay','Apex Interference Core']
+  };
+  var descLeadPool={
+    pack:['Scanners return only fragments from this corridor.','The channel hums behind layered static.','Archive ciphers mask whatever waits inside.'],
+    elite:['Elite telemetry is fractured and hostile.','A high-voltage signature leaks from this vault.','The relay core spits redacted spikes into the feed.'],
+    boss:['All sensors collapse near this signal crown.','The final relay radiates blackout-class interference.','The chamber ahead distorts every reading into noise.']
+  };
+  var detailA=[
+    'Ancient routing marks imply multiple trial chambers',
+    'Residual traces suggest shifting rules and unstable guidance',
+    'Observers note that certainty decays quickly here',
+    'Only fragments of prior runs can be recovered'
+  ];
+  var detailB=[
+    'the path demands adaptation over planning',
+    'survival hinges on reading weak patterns in the storm',
+    'the corridor favors disciplined, flexible runs',
+    'reckless pushes are often punished without warning'
+  ];
+  var omenByTier={
+    calm:['Interference is present but restrained.','The node feels quiet, but not safe.'],
+    rough:['Telemetry jitters in sharp bursts.','Warning signs suggest an uneven, punishing signal.'],
+    brutal:['Blackout-grade pressure detected.','Readings indicate severe interference and high failure risk.']
+  };
+  var signaturePool=[
+    'Cipher lock: unresolved',
+    'Signal class: redacted',
+    'Forecast: non-deterministic',
+    'Access stamp: quarantined',
+    'Route map: obscured'
+  ];
+  var title=runLorePick(seed, titlePool[kind] || titlePool.pack, 0) || 'Unknown Node';
+  var lead=runLorePick(seed, descLeadPool[kind] || descLeadPool.pack, 3);
+  var a=runLorePick(seed, detailA, 7);
+  var b=runLorePick(seed, detailB, 11);
+  var omen=runLorePick(seed, omenByTier[hint.tier] || omenByTier.calm, 17);
+  var signature=runLorePick(seed, signaturePool, 23);
+  var desc=(lead ? (lead+' ') : '') + (a ? (a+', ') : '') + (b || '') + (omen ? (' '+omen) : '');
+  return {
+    title:title,
+    desc:desc || 'Node intel is encrypted until entry.',
+    intel:(a && b) ? (a+'. '+b+'.') : 'Intel remains partial and heavily redacted.',
+    signature:signature || 'Signal class: redacted',
+    omen:omen || hint.text
+  };
+}
 function runObscuredNodeTitle(node){
-  if(!node) return 'Unknown Node';
-  if(node.type==='boss') return 'Unknown Boss Node';
-  if(node.type==='elite') return 'Unknown Elite Node';
-  return 'Unknown Pack Node';
+  return runObscuredNodeProfile(node, null).title;
 }
 function runObscuredNodeDesc(set, node){
-  var hint=runMutatorThreatHint(set ? set.mutators : null, displayDifficulty(set||node||{}), node ? node.type : 'pack');
-  return 'Node intel is encrypted until you enter. ' + hint.text;
+  return runObscuredNodeProfile(node, set).desc;
 }
 function runShopEsc(v){
   return (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -8770,6 +8845,7 @@ function updateCampaignIntroMeta(set, meta){
   var node=runResolveNodeForSet(set) || run.nodes[set.nodeId] || null;
   var detailsVisible=runNodeDetailsRevealed(node, set);
   var mutList = describeMutators((set && set.mutators) ? set.mutators : null);
+  var profile=runObscuredNodeProfile(node, set);
   if(node && node.type==='upgrade'){
     var up=runGetUpgrade(node.upgradeId);
     addIntroItem(meta,'Type','UPGRADE');
@@ -8789,15 +8865,21 @@ function updateCampaignIntroMeta(set, meta){
     : (((node && node.packStage) ? node.packStage : (run.depth+1)) + '/'+RUN_CLUSTER_DEPTH);
   addIntroItem(meta,'Depth', depthLabel);
   addIntroItem(meta,'Difficulty', detailsVisible ? (displayDifficulty(set)||'').toUpperCase() : 'UNKNOWN');
-  addIntroItem(meta,'Levels', ''+stats.total);
-  addIntroItem(meta,'Word length', lens);
-  addIntroItem(meta,'Guess cap', guesses+(range.fixed?'':' (by length)'));
   if(detailsVisible){
+    addIntroItem(meta,'Levels', ''+stats.total);
+    addIntroItem(meta,'Word length', lens);
+    addIntroItem(meta,'Guess cap', guesses+(range.fixed?'':' (by length)'));
     addIntroItem(meta,'Mutators', mutList);
   }else{
+    addIntroItem(meta,'Intel', profile.intel || 'Intel remains partial and heavily redacted.');
+    addIntroItem(meta,'Signal Signature', profile.signature || 'Signal class: redacted');
     addIntroItem(meta,'Mutators','Encrypted until entry');
     var hint=runMutatorThreatHint((set && set.mutators) ? set.mutators : null, displayDifficulty(set||node||{}), node ? node.type : 'pack');
-    if(hint && hint.text){ addIntroItem(meta,'Warning', hint.text); }
+    if(profile.omen){ addIntroItem(meta,'Omen', profile.omen); }
+    else if(hint && hint.text){ addIntroItem(meta,'Omen', hint.text); }
+    if(hint && hint.badge && hint.badge!=='UNKNOWN'){
+      addIntroItem(meta,'Threat', hint.badge);
+    }
   }
   addIntroItem(meta,'Reward', packReward(set)+' coins');
   if(node && safeInt(node.skipPenalty,0)>0){
