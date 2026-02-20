@@ -82,7 +82,7 @@ html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),var(-
 .map-sub{color:var(--muted);margin:0;font-size:.9rem}
 #campaignMap{
   position:relative;
-  height:min(70svh,620px);
+  height:min(74svh,700px);
   border-radius:14px;
   overflow:hidden;
   user-select:none;
@@ -177,19 +177,19 @@ html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),var(-
 #campaignNodes{position:absolute;inset:0;z-index:2}
 .map-node{
   position:absolute;transform:translate(-50%,-50%);
-  min-width:130px;max-width:170px;padding:8px 12px;border-radius:999px;
+  min-width:118px;max-width:154px;padding:7px 10px;border-radius:999px;
   border:2px solid rgba(255,255,255,.3);background:linear-gradient(135deg,rgba(18,22,40,.95),rgba(9,12,24,.95));
   color:var(--fg);font-weight:900;letter-spacing:.1em;text-transform:uppercase;
-  cursor:pointer;text-align:center;font-size:.8rem;
+  cursor:pointer;text-align:center;font-size:.74rem;
   box-shadow:0 6px 20px rgba(100,140,255,.4), 0 0 0 1px rgba(255,255,255,.1) inset;
   backdrop-filter:blur(8px);transition:all .2s ease;
 }
 .map-node:hover{transform:translate(-50%,-50%) scale(1.05);box-shadow:0 8px 24px rgba(100,140,255,.5), 0 0 0 1px rgba(255,255,255,.15) inset}
 .map-diff{
-  position:absolute;left:50%;top:-8px;transform:translate(-50%,-100%);
-  font-size:.62rem;letter-spacing:.18em;text-transform:uppercase;
+  position:absolute;left:50%;top:-6px;transform:translate(-50%,-100%);
+  font-size:.56rem;letter-spacing:.14em;text-transform:uppercase;
   color:rgba(230,236,255,.85);pointer-events:none;
-  padding:2px 8px;border-radius:999px;
+  padding:1px 6px;border-radius:999px;
   background:rgba(8,12,22,.8);border:1px solid rgba(255,255,255,.12)
 }
 .map-node.locked{opacity:.5;filter:saturate(.6);cursor:not-allowed}
@@ -249,11 +249,11 @@ html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),var(-
   content:'DONE';
   position:absolute;
   right:10px;
-  bottom:-9px;
-  padding:1px 6px;
+  bottom:-7px;
+  padding:1px 5px;
   border-radius:999px;
-  font-size:.58rem;
-  letter-spacing:.16em;
+  font-size:.52rem;
+  letter-spacing:.12em;
   background:rgba(10,38,26,.95);
   color:rgba(192,255,229,.98);
   border:1px solid rgba(132,255,195,.72);
@@ -460,6 +460,7 @@ body.mode-campaign{
   --bg:#0a0d1a;--bg2:#05070f;--panel:#0e1326;--key:#1f2233;
   --neutral:#262b3f;--neutral-brd:#363b54;
 }
+body.mode-campaign .board-wrap{--campaignTopRail:102px}
 body.mode-atlas{
   --bg:#0a0d1a;--bg2:#05070f;--panel:#0e1326;--key:#1f2233;
   --neutral:#262b3f;--neutral-brd:#363b54;
@@ -623,8 +624,8 @@ button.icon:active{transform:scale(.96)}
 .tight-board #overlayTitle{display:block}
 .board-scroll{flex:1;display:flex;justify-content:center;align-items:flex-start;overflow:hidden;padding-bottom:26px}
 .board-scroll.centered{align-items:center;padding-top:24px}
-body.mode-campaign .board-scroll{padding-top:56px}
-body.mode-campaign .board-scroll.centered{padding-top:72px}
+body.mode-campaign .board-scroll{padding-top:var(--campaignTopRail)}
+body.mode-campaign .board-scroll.centered{padding-top:calc(var(--campaignTopRail) + 16px)}
 .board-scroll.scroll{overflow-y:auto;overflow-x:hidden}
 .campaign-mutator-tray{
   position:absolute;top:8px;left:10px;right:10px;
@@ -724,6 +725,18 @@ body.mode-campaign .campaign-mutator-tray{display:flex}
 }
 #wrap.countdown-on .board-scroll.centered + #guessLeft{
   top:34px;
+}
+body.mode-campaign #countdownBar{
+  top:46px;
+}
+body.mode-campaign #countdownLabel{
+  top:58px;
+}
+body.mode-campaign .board-scroll.centered + #guessLeft{
+  top:82px;
+}
+body.mode-campaign #wrap.countdown-on .board-scroll.centered + #guessLeft{
+  top:100px;
 }
 body.wildcard-on #guessLeft{pointer-events:auto;cursor:pointer}
 #guessLeft.bump{animation:guessBump .45s ease}
@@ -1102,6 +1115,17 @@ body.campaign-intro #kbd .key{
   }
   .krow{gap:4px}
   .key{padding:8px 4px;font-size:clamp(11px,2.4vw,16px);border-radius:10px}
+}
+@media (max-width:760px){
+  #campaignMap{height:min(76svh,760px)}
+  .map-node{min-width:104px;max-width:140px;padding:6px 8px;font-size:.68rem}
+  .map-diff{font-size:.5rem;letter-spacing:.1em;padding:1px 5px}
+  .map-node.pack-complete::after{right:7px;bottom:-6px;padding:1px 4px;font-size:.48rem;letter-spacing:.1em}
+  body.mode-campaign .board-wrap{--campaignTopRail:112px}
+  body.mode-campaign #countdownBar{top:54px}
+  body.mode-campaign #countdownLabel{top:66px}
+  body.mode-campaign .board-scroll.centered + #guessLeft{top:92px}
+  body.mode-campaign #wrap.countdown-on .board-scroll.centered + #guessLeft{top:110px}
 }
 
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom));
@@ -7741,8 +7765,8 @@ function runNodeOverlapPenaltyAt(x, y, node){
   var ny=(typeof node.map.y==='number' && isFinite(node.map.y)) ? node.map.y : 50;
   var dx=Math.abs(x - nx);
   var dy=Math.abs(y - ny);
-  var xPad=(node.type==='upgrade') ? 10.4 : 12.0;
-  var yPad=(node.type==='upgrade') ? 4.8 : 5.8;
+  var xPad=(node.type==='upgrade') ? 12.8 : 13.8;
+  var yPad=(node.type==='upgrade') ? 6.8 : 7.6;
   var px=Math.max(0, xPad - dx);
   var py=Math.max(0, yPad - dy);
   if(px<=0 || py<=0) return 0;
@@ -7757,13 +7781,13 @@ function runFindOpenNodeSpot(preferredX, preferredY, avoidNodes, xMin, xMax){
   if((maxX-minX)<0.6){ minX=8; maxX=92; }
   var prefX=clamp((typeof preferredX==='number' && isFinite(preferredX)) ? preferredX : 50, minX, maxX);
   var prefY=clamp((typeof preferredY==='number' && isFinite(preferredY)) ? preferredY : 50, 8, 95);
-  var yOffsets=[0,-1.4,1.4,-2.8,2.8];
+  var yOffsets=[0,-1.8,1.8,-3.6,3.6,-5.4,5.4];
   var best={x:prefX,y:prefY,score:Infinity};
   var nodes=Array.isArray(avoidNodes) ? avoidNodes : [];
   for(var yi=0; yi<yOffsets.length; yi++){
     var y=clamp(prefY + yOffsets[yi], 8, 95);
-    for(var x=minX; x<=maxX+0.001; x+=0.5){
-      var score=(Math.abs(x-prefX)*0.06) + (Math.abs(y-prefY)*0.14);
+    for(var x=minX; x<=maxX+0.001; x+=0.4){
+      var score=(Math.abs(x-prefX)*0.07) + (Math.abs(y-prefY)*0.12);
       for(var i=0;i<nodes.length;i++){
         score += runNodeOverlapPenaltyAt(x,y,nodes[i]);
       }
@@ -7800,8 +7824,8 @@ function runReflowUpgradeNodes(){
     ups.sort(function(a,b){ return (a.map.x||50) - (b.map.x||50); });
     var packMin=packs[0].map.x;
     var packMax=packs[packs.length-1].map.x;
-    var laneGap=clamp(13 + (stage*0.35), 13, 18);
-    var baseY=clamp(runStageY(stage,false)+3.8,8,95);
+    var laneGap=clamp(15 + (stage*0.45), 15, 21);
+    var baseY=clamp(runStageY(stage,false)+4.9,8,95);
     var avoid=packs.slice();
     var roomLeft=packMin-8;
     var roomRight=92-packMax;
@@ -7865,8 +7889,8 @@ function runGenerateChoices(fromNodeId){
   if(hasUpgrade){
     var packMin=packXs.length ? Math.min.apply(Math, packXs) : clamp(parentX-7,8,92);
     var packMax=packXs.length ? Math.max.apply(Math, packXs) : clamp(parentX+7,8,92);
-    var laneGap=clamp(13 + (stage*0.35), 13, 18);
-    var baseY=clamp(runStageY(stage,false)+3.8+((runRandom()*1.2)-0.6),8,95);
+    var laneGap=clamp(15 + (stage*0.45), 15, 21);
+    var baseY=clamp(runStageY(stage,false)+4.9+((runRandom()*1.6)-0.8),8,95);
     var leftPref=clamp(packMin - laneGap - ((runRandom()*2)-1), 8, 92);
     var leftSpot=runFindOpenNodeSpot(leftPref, baseY, stageNodes, 8, clamp(packMin-3,8,92));
     var upLeft=runCreateUpgradeNode(stage, leftSpot.x, usedUpgrades, leftSpot.y);
