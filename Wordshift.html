@@ -233,7 +233,36 @@ html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),var(-
   border-color:rgba(255,142,142,.42);
   background:rgba(40,12,12,.86);
 }
-.map-node.complete{border-color:rgba(120,255,170,.55);box-shadow:0 0 14px rgba(120,255,170,.35)}
+.map-node.complete{border-color:rgba(120,255,170,.7);box-shadow:0 0 18px rgba(120,255,170,.42)}
+.map-node.pack-complete{
+  border-color:rgba(124,255,184,.96);
+  background:
+    radial-gradient(150% 120% at 18% 8%, rgba(172,255,214,.26), rgba(172,255,214,0) 58%),
+    linear-gradient(145deg,rgba(18,48,35,.95),rgba(8,22,16,.96));
+  box-shadow:
+    0 10px 28px rgba(112,248,181,.42),
+    0 0 0 1px rgba(176,255,220,.34) inset,
+    0 0 20px rgba(126,255,188,.34);
+}
+.map-node.pack-complete::after{
+  content:'DONE';
+  position:absolute;
+  right:10px;
+  bottom:-9px;
+  padding:1px 6px;
+  border-radius:999px;
+  font-size:.58rem;
+  letter-spacing:.16em;
+  background:rgba(10,38,26,.95);
+  color:rgba(192,255,229,.98);
+  border:1px solid rgba(132,255,195,.72);
+  box-shadow:0 0 10px rgba(126,255,188,.4);
+}
+.map-node.pack-complete .map-diff{
+  border-color:rgba(132,255,195,.48);
+  color:rgba(206,255,234,.98);
+  background:rgba(10,34,24,.88);
+}
 .map-node.resume{border-color:rgba(255,210,120,.6);box-shadow:0 0 14px rgba(255,210,120,.35)}
 .map-node .dot{
   display:inline-block;width:10px;height:10px;border-radius:50%;
@@ -241,6 +270,8 @@ html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),var(-
   box-shadow:0 0 10px rgba(124,140,255,.8);
 }
 .map-node.complete .dot{background:#6ee7b7;box-shadow:0 0 12px rgba(110,231,183,.8)}
+.map-node.pack-complete .dot{background:#86f3c2;box-shadow:0 0 14px rgba(134,243,194,.95)}
+.map-node-title{vertical-align:middle}
 .map-node.resume .dot{background:#ffd166;box-shadow:0 0 12px rgba(255,209,102,.8)}
 .map-node.locked .dot{background:#65708c;box-shadow:none}
 .map-node.locked.teaser .dot{background:rgba(124,140,255,.7);box-shadow:0 0 10px rgba(124,140,255,.45)}
@@ -337,6 +368,11 @@ html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),var(-
   stroke-width:2.2;
   stroke-linecap:round;
 }
+#campaignSvg .campaign-link-complete{
+  stroke:rgba(126,255,188,.95);
+  stroke-width:3.1;
+  filter:drop-shadow(0 0 8px rgba(126,255,188,.45));
+}
 #campaignSvg .campaign-link-upgrade{
   stroke:rgba(255,176,102,.92);
   stroke-width:2.8;
@@ -361,6 +397,10 @@ html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),var(-
 }
 .map-link-dot-choice-locked{
   filter:drop-shadow(0 0 4px rgba(255,128,128,.62));
+}
+.map-link-dot-complete{
+  filter:drop-shadow(0 0 5px rgba(126,255,188,.78));
+  animation:upgradeDotPulse 1.2s ease-in-out infinite;
 }
 @keyframes upgradeDotPulse{
   0%,100%{opacity:.55}
@@ -1003,7 +1043,9 @@ body.campaign-intro #kbd .key{
 .intro-desc{color:var(--muted);margin:6px 0 12px;line-height:1.4}
 .intro-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .intro-head h2{margin:8px 0}
-.intro-head #introClear{margin-left:auto}
+.intro-head-actions{display:flex;align-items:center;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.intro-head-actions #introAutoComplete,
+.intro-head-actions #introClear{margin-left:0}
 .intro-meta{
   display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
   gap:8px;margin:4px 0 12px
@@ -1119,6 +1161,8 @@ button.secondary{background:rgba(255,255,255,.04);border:1.5px solid rgba(255,25
   box-shadow:0 3px 10px rgba(0,0,0,.25);transition:all .15s ease}
 button.secondary:hover{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.3);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.3)}
 button.danger{background:rgba(120,20,20,.2);border:1px solid rgba(255,120,120,.55);color:#ffb9b9}
+button.warning{background:rgba(130,95,10,.28);border:1px solid rgba(255,215,120,.66);color:#ffe8b0}
+button.warning:hover{background:rgba(168,124,18,.34);border-color:rgba(255,229,148,.84);box-shadow:0 5px 14px rgba(220,170,45,.28)}
 button.primary.disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.1)}
 
 #confetti{position:fixed;inset:0;pointer-events:none;z-index:55}
@@ -1947,17 +1991,19 @@ button.primary.disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.1)}
   </div>
 </div>
 
-  <div class="modal" id="campaignIntro">
+<div class="modal" id="campaignIntro">
   <div class="card">
     <div class="intro-head">
       <h2 id="introTitle">Pack intro</h2>
-      <button class="secondary danger" id="introClear">Forfeit</button>
+      <div class="intro-head-actions">
+        <button class="secondary warning" id="introAutoComplete" type="button" title="Authenticate in Options to unlock auto complete.">Auto complete</button>
+        <button class="secondary danger" id="introClear" type="button" title="Authenticate in Options to unlock clear save.">Forfeit</button>
+      </div>
     </div>
     <p id="introDesc" class="intro-desc"></p>
     <div id="introMeta" class="intro-meta"></div>
     <div class="actions">
       <button class="secondary" id="introBack">Back</button>
-      <button class="secondary" id="introAutoComplete">Auto complete</button>
       <button class="primary" id="introStart">Start pack</button>
     </div>
   </div>
@@ -6295,6 +6341,26 @@ function runUpdatePrivateAccessUI(){
   if(optReviewLogoutBtn){
     optReviewLogoutBtn.disabled = !authed;
   }
+  runSyncCampaignIntroAdminControls();
+}
+function runSyncCampaignIntroAdminControls(){
+  var authed=!!runWordReviewAuthed;
+  var clearBtn=$('#introClear');
+  var autoBtn=$('#introAutoComplete');
+  if(autoBtn){
+    autoBtn.style.display = authed ? 'inline-flex' : 'none';
+    autoBtn.disabled = !authed;
+    autoBtn.title = authed ? 'Auto-complete this node (admin only).' : 'Authenticate in Options first.';
+  }
+  if(clearBtn){
+    var hasSave=(clearBtn.getAttribute('data-has-save')==='1');
+    var show=authed && hasSave;
+    clearBtn.style.display = show ? 'inline-flex' : 'none';
+    clearBtn.disabled = !show;
+    if(!authed) clearBtn.title='Authenticate in Options first.';
+    else if(!hasSave) clearBtn.title='No saved node progress to clear.';
+    else clearBtn.title='Clear saved node progress.';
+  }
 }
 async function runAuthenticateWordReviewKey(key, opts){
   opts=opts || {};
@@ -8159,9 +8225,10 @@ function showCampaignIntro(set, onStart){
   var saved=!isUpgrade ? load(campaignKey(set.id), null) : null;
   if(btn){ btn.textContent = isUpgrade ? 'Claim upgrade' : (saved ? 'Resume node' : 'Start node'); }
   if(clear){
-    clear.style.display = saved ? 'inline-flex' : 'none';
     clear.textContent='Clear save';
+    clear.setAttribute('data-has-save', saved ? '1' : '0');
   }
+  runSyncCampaignIntroAdminControls();
   if(btn){
     btn.disabled=false;
     btn.classList.remove('disabled');
@@ -8184,11 +8251,22 @@ function showCampaignIntro(set, onStart){
     if(autoBtn) autoBtn.removeEventListener('click', onAuto);
   };
   var onClear=function(){
+    if(!runWordReviewAuthed){
+      toast('Authenticate in Options before using admin controls.');
+      runSyncCampaignIntroAdminControls();
+      return;
+    }
     removeKey(campaignKey(set.id));
-    if(clear) clear.style.display='none';
+    if(clear) clear.setAttribute('data-has-save','0');
+    runSyncCampaignIntroAdminControls();
     if(meta) updateCampaignIntroMeta(set, meta);
   };
   var onAuto=function(){
+    if(!runWordReviewAuthed){
+      toast('Authenticate in Options before using admin controls.');
+      runSyncCampaignIntroAdminControls();
+      return;
+    }
     if(set.nodeId){
       var run=ensureRunCampaign();
       var node=run.nodes[set.nodeId];
@@ -8314,10 +8392,18 @@ function buildCampaignMenu(){
   if(!campaignNodesEl || !campaignSvg) return;
   if(campaignMapEl){ campaignMapEl.style.setProperty('--cluster-hue', runClusterHueDeg(runCampaign.cluster)+'deg'); }
   var mapSub=$('.map-sub');
-  if(mapSub){ mapSub.textContent='Cluster '+runCampaign.cluster+' - clear '+RUN_CLUSTER_DEPTH+' nodes, then beat the boss.'; }
   campaignNodesEl.innerHTML='';
   while(campaignSvg.firstChild) campaignSvg.removeChild(campaignSvg.firstChild);
   var nodes=Object.keys(runCampaign.nodes).map(function(id){ return runCampaign.nodes[id]; });
+  var completedPackCount=0;
+  var totalPackCount=0;
+  nodes.forEach(function(node){
+    if(runIsPackNodeType(node.type)){
+      totalPackCount++;
+      if(runCampaign.completed && runCampaign.completed[node.id]) completedPackCount++;
+    }
+  });
+  if(mapSub){ mapSub.textContent='Cluster '+runCampaign.cluster+' - clear '+RUN_CLUSTER_DEPTH+' nodes, then beat the boss. Completed packs: '+completedPackCount+'/'+totalPackCount+'.'; }
   nodes.sort(function(a,b){
     if(a.map.y!==b.map.y) return b.map.y-a.map.y;
     return a.map.x-b.map.x;
@@ -8330,18 +8416,25 @@ function buildCampaignMenu(){
     var choiceLocked=(node.type==='upgrade' && skipped);
     var available=(runCampaign.frontier||[]).indexOf(node.id)!==-1;
     var locked=!available && !completed && !saved;
-    var isNonPack=!runIsPackNodeType(node.type);
+    var isPackNode=runIsPackNodeType(node.type);
     var cls='map-node'+(locked?' locked':'')+(saved?' resume':'')+(completed?' complete':'');
+    if(completed && isPackNode) cls+=' pack-complete';
     if(node.type==='upgrade') cls+=' upgrade-node';
     if(node.type==='elite') cls+=' elite-node';
     if(choiceLocked) cls+=' choice-locked';
     else if(skipped) cls+=' teaser';
-    var badge=choiceLocked ? 'CHOICE LOCKED' : ((node.type==='upgrade')?'UPGRADE':(node.type==='boss'?'BOSS':(node.type==='elite'?'ELITE':(displayDifficulty(node)||'').toUpperCase())));
+    var badge='';
+    if(choiceLocked){ badge='CHOICE LOCKED'; }
+    else if(completed && isPackNode){
+      badge = (node.type==='boss') ? 'BOSS CLEARED' : (node.type==='elite' ? 'ELITE CLEARED' : 'PACK CLEARED');
+    }else{
+      badge=((node.type==='upgrade')?'UPGRADE':(node.type==='boss'?'BOSS':(node.type==='elite'?'ELITE':(displayDifficulty(node)||'').toUpperCase())));
+    }
     var title=node.title || node.id;
     var btn=document.createElement('button');
     btn.className=cls;
     btn.setAttribute('data-set', node.id);
-    btn.innerHTML='<span class="map-diff">'+badge+'</span><span class="dot"></span>'+title;
+    btn.innerHTML='<span class="map-diff">'+badge+'</span><span class="dot"></span><span class="map-node-title">'+title+'</span>';
     btn.style.left=(node.map && node.map.x || 50)+'%';
     btn.style.top=(node.map && node.map.y || 50)+'%';
     if(locked){
@@ -8349,7 +8442,7 @@ function buildCampaignMenu(){
     }else if(saved){
       btn.title='Resume';
     }else if(completed){
-      btn.title='Complete';
+      btn.title=isPackNode ? 'Completed pack' : 'Completed';
     }else{
       btn.title='Start';
     }
@@ -8366,19 +8459,23 @@ function buildCampaignMenu(){
     var linkTouchesNonPack=!runIsPackNodeType(from.type) || !runIsPackNodeType(to.type);
     var eliteLink=(from.type==='elite' || to.type==='elite');
     var choiceLockedLink=(to.type==='upgrade' && !!runCampaign.skipped[to.id]);
+    var completedLink=!!runCampaign.completed[from.id] && !!runCampaign.completed[to.id];
     var line=document.createElementNS('http://www.w3.org/2000/svg','line');
     line.setAttribute('x1', from.map.x+'%');
     line.setAttribute('y1', from.map.y+'%');
     line.setAttribute('x2', to.map.x+'%');
     line.setAttribute('y2', to.map.y+'%');
+    var lineClass='';
     if(choiceLockedLink){
-      line.setAttribute('class','campaign-link-choice-locked');
+      lineClass='campaign-link-choice-locked';
     }else if(eliteLink){
-      line.setAttribute('class','campaign-link-elite');
+      lineClass='campaign-link-elite';
     }else{
-      line.setAttribute('class', linkTouchesNonPack ? 'campaign-link-upgrade' : 'campaign-link-pack');
+      lineClass=(linkTouchesNonPack ? 'campaign-link-upgrade' : 'campaign-link-pack');
     }
-    if(linkTouchesNonPack && !choiceLockedLink){
+    if(completedLink){ lineClass += ' campaign-link-complete'; }
+    line.setAttribute('class', lineClass);
+    if(linkTouchesNonPack && !choiceLockedLink && !completedLink){
       line.style.animationDelay=(Math.random()*3).toFixed(2)+'s';
       line.style.strokeDashoffset=((Math.random()*24)|0)+'';
     }
@@ -8390,8 +8487,9 @@ function buildCampaignMenu(){
       dot.setAttribute('cx', cx+'%');
       dot.setAttribute('cy', cy+'%');
       dot.setAttribute('r', eliteLink ? 3.7 : (linkTouchesNonPack ? 3.6 : 3.2));
-      dot.setAttribute('fill', choiceLockedLink ? 'rgba(255,154,154,.95)' : (eliteLink ? 'rgba(255,126,126,.95)' : (linkTouchesNonPack ? 'rgba(255,200,138,.95)' : 'rgba(146,196,255,.95)')));
+      dot.setAttribute('fill', completedLink ? 'rgba(126,255,188,.95)' : (choiceLockedLink ? 'rgba(255,154,154,.95)' : (eliteLink ? 'rgba(255,126,126,.95)' : (linkTouchesNonPack ? 'rgba(255,200,138,.95)' : 'rgba(146,196,255,.95)'))));
       if(choiceLockedLink){ dot.setAttribute('class','map-link-dot-choice-locked'); }
+      else if(completedLink){ dot.setAttribute('class','map-link-dot-complete'); }
       else if(eliteLink){ dot.setAttribute('class','map-link-dot-elite'); }
       else if(linkTouchesNonPack){ dot.setAttribute('class','map-link-dot-upgrade'); }
       campaignSvg.appendChild(dot);
