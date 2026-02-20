@@ -72,7 +72,28 @@ async function resolveStore(context) {
     throw new Error('@netlify/blobs loaded but getStore is unavailable');
   }
 
-  return mod.getStore('wordshift-data');
+  const siteID = process.env.NETLIFY_SITE_ID || process.env.SITE_ID || process.env.BLOBS_SITE_ID || '';
+  const token = process.env.NETLIFY_AUTH_TOKEN || process.env.BLOBS_TOKEN || process.env.NETLIFY_BLOBS_TOKEN || '';
+
+  // If explicit credentials exist, use them.
+  if (siteID && token) {
+    try {
+      return mod.getStore({ name: 'wordshift-data', siteID, token });
+    } catch (_) {
+      // Compatibility fallback for older SDK signatures.
+      return mod.getStore('wordshift-data', { siteID, token });
+    }
+  }
+
+  // Last attempt without explicit credentials (will work only if runtime is configured for blobs).
+  try {
+    return mod.getStore('wordshift-data');
+  } catch (e) {
+    throw new Error(
+      'Blobs unavailable. Set NETLIFY_SITE_ID and NETLIFY_AUTH_TOKEN (or BLOBS_SITE_ID/BLOBS_TOKEN). Original: '
+      + String((e && e.message) || e || 'unknown')
+    );
+  }
 }
 
 exports.handler = async (event, context) => {
@@ -109,7 +130,8 @@ exports.handler = async (event, context) => {
   } catch (error) {
     return json(500, {
       error: String((error && error.message) || error || 'Unknown error'),
-      hint: 'Check Netlify function logs and ensure Blobs is available for this site.'
+      hint: 'Configure Blobs by setting NETLIFY_SITE_ID and NETLIFY_AUTH_TOKEN env vars in Netlify (or BLOBS_SITE_ID/BLOBS_TOKEN).'
+
     });
   }
 };
