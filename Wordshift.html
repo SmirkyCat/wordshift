@@ -3782,7 +3782,7 @@ function recomputeStatuses(){
 }
 function lifelineRevealCap(){
   var len=Math.max(1, state.target.length || 0);
-  return Math.max(2, Math.floor(len/2));
+  return runLifelineRevealCapForLen(len);
 }
 function lifelineEffectiveRemaining(){
   var raw=(typeof state.lifelineRemaining==='number') ? state.lifelineRemaining : 0;
@@ -7471,6 +7471,17 @@ function runYellowCapForDifficulty(difficulty){
   var d=effectiveDifficulty(difficulty);
   return d==='impossible' ? 3 : 9;
 }
+function runLifelineRevealCapForLen(len){
+  var n=Math.max(1, safeInt(len,1));
+  return Math.max(2, Math.floor(n/2));
+}
+function runRequiredStarterYellowsForMutator(mut, wordLen){
+  if(!mut || !mut.lifeline) return 0;
+  var len=Math.max(1, safeInt(wordLen,1));
+  var raw=clampLifeCount(mut.lifelineCount || 1);
+  var effective=Math.min(raw, runLifelineRevealCapForLen(len));
+  return clamp(effective + 1, 2, len);
+}
 function runCountStarterYellows(target, starter, difficulty){
   target=lettersOnlyUpper(target||'');
   starter=lettersOnlyUpper(starter||'');
@@ -7525,14 +7536,15 @@ function runMakeStarter(word, minYellow, difficulty){
   }
   return chars.join('');
 }
-function runEnsureLifelineStarter(target, starter, difficulty){
+function runEnsureLifelineStarter(target, starter, difficulty, minYellow){
   target=lettersOnlyUpper(target||'');
   if(!target) return '';
   var out=lettersOnlyUpper(starter||'');
   if(out.length!==target.length) out='';
+  var needed=Math.max(0, safeInt(minYellow,2));
   var yellows=runCountStarterYellows(target, out, difficulty);
-  if(yellows>=2) return out;
-  return runMakeStarter(target, 2, difficulty);
+  if(yellows>=needed) return out;
+  return runMakeStarter(target, needed, difficulty);
 }
 function runAddLink(a,b){
   runCampaign.links.push([a,b]);
@@ -7664,7 +7676,7 @@ function runCreatePackNode(arch, packStage, slot, isBoss, opts){
   }
   var words=[];
   var baseDiff=isBoss?'hard':(elite?'hard':arch.difficulty);
-  var needYellow=mut.lifeline ? 2 : 0;
+  var needYellow=runRequiredStarterYellowsForMutator(mut, len);
   for(var i=0;i<count;i++){
     var w=runPickWord(len, {preferSeed:false});
     words.push({
@@ -8087,7 +8099,6 @@ function runRefreshFrontierWordsFromRemote(){
     if(load(campaignKey(setId), null)) return;
     if(!Array.isArray(node.words) || !node.words.length) return;
 
-    var needYellow=(node.mutators && node.mutators.lifeline) ? 2 : 0;
     var diff=(node.type==='boss') ? 'hard' : (node.difficulty || 'normal');
     var nextWords=[];
     for(var i=0;i<node.words.length;i++){
@@ -8096,6 +8107,7 @@ function runRefreshFrontierWordsFromRemote(){
       var range=runClusterWordLenRange(node.cluster || runCampaign.cluster);
       var len=oldWord.length || clamp(safeInt(node.wordLen,5), range.min, range.max);
       len=clamp(len, range.min, range.max);
+      var needYellow=runRequiredStarterYellowsForMutator(node.mutators || null, len);
       var picked=runPickWord(len, {preferSeed:false});
       var hadStarter=!!(entry && typeof entry==='object' && entry.starter);
       var starter=(hadStarter || needYellow>0) ? runMakeStarter(picked, needYellow, diff) : '';
@@ -8125,7 +8137,6 @@ function runRefreshFrontierWordsForReview(){
     if(!Array.isArray(node.words) || !node.words.length) return;
 
     var touched=false;
-    var needYellow=(node.mutators && node.mutators.lifeline) ? 2 : 0;
     var diff=(node.type==='boss') ? 'hard' : (node.difficulty || 'normal');
     for(var i=0;i<node.words.length;i++){
       var entry=node.words[i];
@@ -8134,6 +8145,7 @@ function runRefreshFrontierWordsForReview(){
       var range=runClusterWordLenRange(node.cluster || runCampaign.cluster);
       var len=oldWord.length || clamp(safeInt(node.wordLen,5), range.min, range.max);
       len=clamp(len, range.min, range.max);
+      var needYellow=runRequiredStarterYellowsForMutator(node.mutators || null, len);
       var picked=runPickWord(len, {preferSeed:false});
       var hadStarter=!!(entry && typeof entry==='object' && entry.starter);
       var starter=(hadStarter || needYellow>0) ? runMakeStarter(picked, needYellow, diff) : '';
@@ -8421,12 +8433,16 @@ function runBuildSetFromNode(node){
       var entry=set.words[i];
       if(!entry) continue;
       if(typeof entry==='string'){
-        set.words[i]={word:entry, starter:runMakeStarter(entry,2,set.difficulty)};
+        var sWord=lettersOnlyUpper(entry||'');
+        if(!sWord) continue;
+        var sNeed=runRequiredStarterYellowsForMutator(set.mutators, sWord.length);
+        set.words[i]={word:sWord, starter:runMakeStarter(sWord, sNeed, set.difficulty)};
         continue;
       }
       var word=lettersOnlyUpper(entry.word||'');
       if(!word) continue;
-      entry.starter=runEnsureLifelineStarter(word, entry.starter || '', set.difficulty);
+      var need=runRequiredStarterYellowsForMutator(set.mutators, word.length);
+      entry.starter=runEnsureLifelineStarter(word, entry.starter || '', set.difficulty, need);
     }
   }
   if((runCampaign.clusterTraits||[]).indexOf('t_hoard')!==-1 && Array.isArray(set.words)){
