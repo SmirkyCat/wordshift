@@ -6,8 +6,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "wordshift-db",
-      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+      "database_name": "wordshift-words",
+      "database_id": "c53dfa20-cf45-4ed8-a1e0-17a2bc175fdf"
     }
   ]
 }
