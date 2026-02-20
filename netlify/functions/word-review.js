@@ -73,12 +73,7 @@ function getQueryParam(event, key) {
   return '';
 }
 async function resolveStore(context) {
-  // Prefer runtime-provided blobs when available.
-  if (context && context.blobs && typeof context.blobs.getStore === 'function') {
-    return context.blobs.getStore('wordshift-data');
-  }
-
-  // Fallback to SDK import at runtime (not module top-level) so failures return JSON instead of hard 502.
+  // Load SDK at runtime so initialization errors become JSON responses.
   let mod = null;
   try {
     mod = await import('@netlify/blobs');
@@ -93,17 +88,30 @@ async function resolveStore(context) {
   const siteID = process.env.NETLIFY_SITE_ID || process.env.SITE_ID || process.env.BLOBS_SITE_ID || '';
   const token = process.env.NETLIFY_AUTH_TOKEN || process.env.BLOBS_TOKEN || process.env.NETLIFY_BLOBS_TOKEN || '';
 
-  // If explicit credentials exist, use them.
+  // Prefer explicit credentials when provided.
   if (siteID && token) {
     try {
       return mod.getStore({ name: 'wordshift-data', siteID, token });
     } catch (_) {
-      // Compatibility fallback for older SDK signatures.
-      return mod.getStore('wordshift-data', { siteID, token });
+      try {
+        // Compatibility fallback for older SDK signatures.
+        return mod.getStore('wordshift-data', { siteID, token });
+      } catch (e2) {
+        throw new Error('Explicit credential store init failed: ' + String((e2 && e2.message) || e2 || 'unknown'));
+      }
     }
   }
 
-  // Last attempt without explicit credentials (will work only if runtime is configured for blobs).
+  // Next fallback: runtime-provided blobs context.
+  if (context && context.blobs && typeof context.blobs.getStore === 'function') {
+    try {
+      return context.blobs.getStore('wordshift-data');
+    } catch (_) {
+      // Continue to final SDK default fallback.
+    }
+  }
+
+  // Final attempt: SDK default runtime resolution.
   try {
     return mod.getStore('wordshift-data');
   } catch (e) {
@@ -113,7 +121,6 @@ async function resolveStore(context) {
     );
   }
 }
-
 exports.handler = async (event, context) => {
   try {
     if (event.httpMethod === 'OPTIONS') {
