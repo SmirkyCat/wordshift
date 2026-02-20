@@ -4741,10 +4741,13 @@ function runLoadWordReviewFromFile(opts){
   if(/^[A-Za-z]:[\\/]/.test(reqUrl)){
     reqUrl='file:///'+reqUrl.replace(/\\/g,'/');
   }
+  if(/\/\.netlify\/functions\/word-review(?:\?|$)/i.test(reqUrl)){
+    reqUrl += (reqUrl.indexOf('?')>=0 ? '&' : '?') + '_ts=' + Date.now();
+  }
 
   // Browsers block local file reads from file:// pages via fetch.
   if(location && location.protocol==='file:' && /^file:\/\//i.test(reqUrl)){
-    runWordReviewFileMeta={url:reqUrl,loaded:false,lastError:'Local file fetch blocked by browser on file:// pages'};
+    runWordReviewFileMeta={url:url,loaded:false,lastError:'Local file fetch blocked by browser on file:// pages'};
     if(!opts.silent){
       toast('Local file URLs are blocked here. Run from localhost or use an https URL.');
     }
@@ -4779,7 +4782,7 @@ function runLoadWordReviewFromFile(opts){
       }
       var parsed=JSON.parse(String(text||'{}'));
       runWordReviewFile=runNormalizeWordReview(parsed);
-      runWordReviewFileMeta={url:reqUrl,loaded:true,lastError:''};
+      runWordReviewFileMeta={url:url,loaded:true,lastError:''};
       runRebuildWordReview();
       if(!opts.silent) toast('Campaign word file loaded.');
       var refreshed=runRefreshFrontierWordsForReview();
@@ -4789,7 +4792,7 @@ function runLoadWordReviewFromFile(opts){
       }
       return true;
     }).catch(function(e){
-      runWordReviewFileMeta={url:reqUrl,loaded:false,lastError:String((e && e.message) || e || 'load failed')};
+      runWordReviewFileMeta={url:url,loaded:false,lastError:String((e && e.message) || e || 'load failed')};
       if(!opts.silent){
         toast('Campaign word file load failed.');
         console.error(e);
@@ -4797,7 +4800,7 @@ function runLoadWordReviewFromFile(opts){
       return false;
     });
   }catch(e){
-    runWordReviewFileMeta={url:reqUrl,loaded:false,lastError:String((e && e.message) || e || 'load failed')};
+    runWordReviewFileMeta={url:url,loaded:false,lastError:String((e && e.message) || e || 'load failed')};
     if(!opts.silent){
       toast('Campaign word file load failed.');
       console.error(e);
@@ -8177,7 +8180,9 @@ window.addEventListener('beforeunload', function(){
   var isLocal=(host==='localhost' || host==='127.0.0.1' || host==='::1');
   if(location.protocol!=='https:' && !isLocal) return;
   window.addEventListener('load', function(){
-    navigator.serviceWorker.register('./sw.js').catch(function(err){
+    navigator.serviceWorker.register('./sw.js').then(function(reg){
+      try{ if(reg && reg.update) reg.update(); }catch(_){ }
+    }).catch(function(err){
       console.warn('[pwa] service worker registration failed', err);
     });
   });
