@@ -622,7 +622,73 @@ button.icon:active{transform:scale(.96)}
 .tight-board #overlayTitle{display:block}
 .board-scroll{flex:1;display:flex;justify-content:center;align-items:flex-start;overflow:hidden;padding-bottom:26px}
 .board-scroll.centered{align-items:center;padding-top:24px}
+body.mode-campaign .board-scroll{padding-top:56px}
+body.mode-campaign .board-scroll.centered{padding-top:72px}
 .board-scroll.scroll{overflow-y:auto;overflow-x:hidden}
+.campaign-mutator-tray{
+  position:absolute;top:8px;left:10px;right:10px;
+  display:none;align-items:flex-start;gap:8px;
+  z-index:9;pointer-events:none;
+}
+body.mode-campaign .campaign-mutator-tray{display:flex}
+.campaign-mutator-tray > *{pointer-events:auto}
+.campaign-mutator-toggle{
+  min-width:34px;height:34px;padding:0 10px;
+  font-size:18px;line-height:1;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.campaign-mutator-summary{
+  flex:1;
+  min-height:34px;
+  display:flex;align-items:center;
+  padding:6px 10px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.2);
+  background:rgba(6,10,20,.7);
+  color:rgba(232,240,255,.95);
+  font-size:.72rem;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  box-shadow:0 4px 14px rgba(0,0,0,.35);
+}
+.campaign-mutator-summary.hint-rough{border-color:rgba(255,181,111,.55);color:rgba(255,224,181,.95)}
+.campaign-mutator-summary.hint-brutal{border-color:rgba(255,126,126,.68);color:rgba(255,210,210,.98)}
+.campaign-mutator-panel{
+  position:absolute;top:40px;left:0;
+  width:min(480px, calc(100% - 8px));
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.18);
+  background:linear-gradient(180deg, rgba(10,16,30,.96), rgba(6,10,22,.94));
+  box-shadow:0 12px 34px rgba(0,0,0,.48);
+  padding:10px;
+}
+.campaign-mutator-panel[hidden]{display:none!important}
+.campaign-mutator-hint{
+  font-size:.68rem;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:rgba(186,198,222,.95);
+  margin-bottom:8px;
+}
+.campaign-mutator-hint.hint-rough{color:rgba(255,220,168,.98)}
+.campaign-mutator-hint.hint-brutal{color:rgba(255,188,188,.98)}
+.campaign-mutator-list{
+  display:flex;flex-wrap:wrap;gap:6px;
+}
+.campaign-mutator-chip{
+  font-size:.66rem;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.2);
+  background:rgba(255,255,255,.06);
+  color:rgba(235,241,255,.95);
+  padding:4px 8px;
+}
+.campaign-mutator-chip.strong{
+  border-color:rgba(255,132,132,.62);
+  background:rgba(140,30,30,.28);
+}
 #guessLeft{
   position:absolute;left:50%;bottom:6px;transform:translate(-50%, 0);pointer-events:none;
   font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.35);
@@ -1575,6 +1641,14 @@ button.primary.disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.1)}
   <div class="main">
     <section class="section board-wrap" id="wrap">
       <div id="overlayTitle">WORDSHIFT</div>
+      <div id="campaignMutatorTray" class="campaign-mutator-tray" hidden>
+        <button class="icon campaign-mutator-toggle" id="campaignMutatorToggle" type="button" aria-expanded="false" title="Show level modifiers">&#9776;</button>
+        <div id="campaignMutatorSummary" class="campaign-mutator-summary">Modifiers hidden until node entry.</div>
+        <div id="campaignMutatorPanel" class="campaign-mutator-panel" hidden>
+          <div id="campaignMutatorHint" class="campaign-mutator-hint"></div>
+          <div id="campaignMutatorList" class="campaign-mutator-list"></div>
+        </div>
+      </div>
       <div id="hotseatBar" class="hotseat-bar">
         <div class="hs-team red">
           <div class="hs-name">RED</div>
@@ -3112,6 +3186,7 @@ function buildBoard(restore){
   updateTypingPreview();
   updateGuessLabel(false);
   updateCampaignProgress();
+  runRenderCampaignMutatorTray();
   updateRowVisibility(false);
   if(state.mode==='hotseat'){
     hotseatPrefillGreens(state.row);
@@ -5983,6 +6058,12 @@ var menuDarkReaderWarning=$('#menuDarkReaderWarning');
 var menuBtn=$('#btnMenu');
 var menuFsBtn=$('#btnMenuFS');
 var coinDisplay=$('#coinDisplay');
+var campaignMutatorTrayEl=$('#campaignMutatorTray');
+var campaignMutatorToggleEl=$('#campaignMutatorToggle');
+var campaignMutatorSummaryEl=$('#campaignMutatorSummary');
+var campaignMutatorPanelEl=$('#campaignMutatorPanel');
+var campaignMutatorHintEl=$('#campaignMutatorHint');
+var campaignMutatorListEl=$('#campaignMutatorList');
 var campaignShopEl=$('#campaignShop');
 var shopConsumablesEl=$('#shopConsumables');
 var shopPermanentsEl=$('#shopPermanents');
@@ -6033,6 +6114,7 @@ var runWordReviewRateLimitMessage='';
 var runWordReviewRateLimitTicker=null;
 var runWordReviewFileHandle=null;
 var runWordReviewFileSync={lastOk:0,lastError:'',lastTarget:''};
+var campaignMutatorPanelOpen=false;
 var started=false;
 var activeCampaign=null;
 var currency=load('currency', 0);
@@ -6040,6 +6122,7 @@ var currency=load('currency', 0);
 function setBodyMode(mode){
   document.body.classList.remove('mode-campaign','mode-sandbox','mode-atlas','mode-hotseat','hs-turn-red','hs-turn-blue');
   if(mode) document.body.classList.add('mode-'+mode);
+  runRenderCampaignMutatorTray();
 }
 function setCampaignBossMode(on){
   document.body.classList.toggle('campaign-boss', !!on);
@@ -7133,6 +7216,7 @@ function runCreateState(seedVal){
     links:[],
     frontier:[],
     completed:{},
+    revealed:{},
     skipped:{},
     activeNodeId:null,
     wordSource:'unknown',
@@ -7588,6 +7672,7 @@ function ensureRunCampaign(){
   }
   if(!runCampaign.permanentBuffs){ runCampaign.permanentBuffs=runDefaultPermBuffs(); }
   if(!runCampaign.tempBuffs){ runCampaign.tempBuffs=runDefaultTempBuffs(); }
+  if(!runCampaign.revealed || typeof runCampaign.revealed!=='object'){ runCampaign.revealed={}; }
   if(!Array.isArray(runCampaign.clusterTraits)){ runCampaign.clusterTraits=[]; }
   if(typeof runCampaign.pendingShop==='undefined'){ runCampaign.pendingShop=null; }
   if(!runCampaign.nodes || !Object.keys(runCampaign.nodes).length){
@@ -8021,6 +8106,91 @@ function runResolveNodeForSet(set){
   if(nodeId && run.nodes[nodeId]) return run.nodes[nodeId];
   return null;
 }
+function runSetIdForNode(node){
+  if(!node || !node.id) return '';
+  return RUN_SET_PREFIX+node.id;
+}
+function runNodeDetailsRevealed(node, set){
+  if(!node || !runIsPackNodeType(node.type)) return true;
+  var run=ensureRunCampaign();
+  var setId=(set && set.id) ? set.id : runSetIdForNode(node);
+  if(node.id && run.activeNodeId===node.id) return true;
+  if(node.id && run.revealed && run.revealed[node.id]) return true;
+  if(node.id && run.completed && run.completed[node.id]) return true;
+  if(setId && load(campaignKey(setId), null)) return true;
+  return false;
+}
+function runMutatorThreatScore(mut, displayDiff, nodeType){
+  if(!mut) return 0;
+  var score=0;
+  var enabled=0;
+  function bump(name, val){
+    if(mut[name]){
+      enabled++;
+      score += val;
+    }
+  }
+  bump('countdown', 3.0);
+  bump('hotPotato', 2.5);
+  bump('minDistance', 2.1);
+  bump('copycat', 1.8);
+  bump('randomKeyboard', 1.4);
+  bump('drift', 1.4);
+  bump('fog', 1.2);
+  bump('phantomLetter', 1.1);
+  bump('bloodMirage', 1.1);
+  bump('noisyArrows', 1.0);
+  bump('mirror', 0.9);
+  bump('blindStart', 0.9);
+  bump('echo', 0.9);
+  bump('staticTile', 0.8);
+  bump('doubleVision', 0.7);
+  bump('budget', 0.8);
+  bump('vowelsOnly', 0.5);
+  if(mut.countdown){
+    score += Math.max(0, 24 - clamp(safeInt(mut.countdownSec, 30), 5, 120)) * 0.18;
+    score += clamp(safeInt(mut.countdownKeyCenti, 0), 0, 9) * 0.16;
+  }
+  if(mut.minDistance){
+    score += Math.max(0, clampMinDistance(mut.minDistanceVal) - 8) * 0.28;
+  }
+  if(mut.copycat){
+    score += Math.max(0, safeInt(mut.copycatMin, 2) - 2) * 0.55;
+  }
+  if(mut.lifeline){
+    score -= Math.min(1.6, clampLifeCount(mut.lifelineCount || 1) * 0.4);
+  }
+  if(enabled>=4) score += 1.0;
+  if(enabled>=6) score += 1.2;
+  if((displayDiff||'')==='insane') score += 1.4;
+  else if((displayDiff||'')==='hard' || (displayDiff||'')==='elite') score += 0.8;
+  if(nodeType==='elite') score += 1.0;
+  if(nodeType==='boss') score += 1.8;
+  return Math.max(0, score);
+}
+function runMutatorThreatHint(mut, displayDiff, nodeType){
+  var score=runMutatorThreatScore(mut, displayDiff, nodeType);
+  if(score>=8.4){
+    return {tier:'brutal', badge:'BRUTAL', text:'Warning: mutator load looks brutal.'};
+  }
+  if(score>=5.6){
+    return {tier:'rough', badge:'RISKY', text:'Warning: mutator load looks rough.'};
+  }
+  if(score>=3.4){
+    return {tier:'rough', badge:'SPIKY', text:'Warning: mutator mix may spike difficulty.'};
+  }
+  return {tier:'calm', badge:'UNKNOWN', text:'Mutator intel is hidden until entry.'};
+}
+function runObscuredNodeTitle(node){
+  if(!node) return 'Unknown Node';
+  if(node.type==='boss') return 'Unknown Boss Node';
+  if(node.type==='elite') return 'Unknown Elite Node';
+  return 'Unknown Pack Node';
+}
+function runObscuredNodeDesc(set, node){
+  var hint=runMutatorThreatHint(set ? set.mutators : null, displayDifficulty(set||node||{}), node ? node.type : 'pack');
+  return 'Node intel is encrypted until you enter. ' + hint.text;
+}
 function runShopEsc(v){
   return (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -8209,8 +8379,10 @@ function runCompleteNodeAndAdvance(node, set, opts){
 
 function showCampaignIntro(set, onStart){
   var modal=$('#campaignIntro'); if(!modal) return onStart();
-  $('#introTitle').textContent = (set.title || 'Run Node');
-  $('#introDesc').textContent = set.intro || 'Begin this node.';
+  var node=runResolveNodeForSet(set) || (set && set.nodeId && runCampaign && runCampaign.nodes ? runCampaign.nodes[set.nodeId] : null);
+  var hideDetails=!!(node && runIsPackNodeType(node.type) && !runNodeDetailsRevealed(node, set));
+  $('#introTitle').textContent = hideDetails ? runObscuredNodeTitle(node) : (set.title || 'Run Node');
+  $('#introDesc').textContent = hideDetails ? runObscuredNodeDesc(set, node) : (set.intro || 'Begin this node.');
   var meta=$('#introMeta');
   if(meta){
     meta.innerHTML='';
@@ -8306,6 +8478,7 @@ function updateCampaignIntroMeta(set, meta){
   meta.innerHTML='';
   var run=ensureRunCampaign();
   var node=runResolveNodeForSet(set) || run.nodes[set.nodeId] || null;
+  var detailsVisible=runNodeDetailsRevealed(node, set);
   var mutList = describeMutators((set && set.mutators) ? set.mutators : null);
   if(node && node.type==='upgrade'){
     var up=runGetUpgrade(node.upgradeId);
@@ -8325,11 +8498,17 @@ function updateCampaignIntroMeta(set, meta){
     ? 'Boss'
     : (((node && node.packStage) ? node.packStage : (run.depth+1)) + '/'+RUN_CLUSTER_DEPTH);
   addIntroItem(meta,'Depth', depthLabel);
-  addIntroItem(meta,'Difficulty', (displayDifficulty(set)||'').toUpperCase());
+  addIntroItem(meta,'Difficulty', detailsVisible ? (displayDifficulty(set)||'').toUpperCase() : 'UNKNOWN');
   addIntroItem(meta,'Levels', ''+stats.total);
   addIntroItem(meta,'Word length', lens);
   addIntroItem(meta,'Guess cap', guesses+(range.fixed?'':' (by length)'));
-  addIntroItem(meta,'Mutators', mutList);
+  if(detailsVisible){
+    addIntroItem(meta,'Mutators', mutList);
+  }else{
+    addIntroItem(meta,'Mutators','Encrypted until entry');
+    var hint=runMutatorThreatHint((set && set.mutators) ? set.mutators : null, displayDifficulty(set||node||{}), node ? node.type : 'pack');
+    if(hint && hint.text){ addIntroItem(meta,'Warning', hint.text); }
+  }
   addIntroItem(meta,'Reward', packReward(set)+' coins');
   if(node && safeInt(node.skipPenalty,0)>0){
     addIntroItem(meta,'Penalty','-'+safeInt(node.skipPenalty,0)+' guess'+(safeInt(node.skipPenalty,0)===1?'':'es')+' (skipped upgrades)');
@@ -8387,6 +8566,65 @@ function describeMutators(mut){
   if(mut.countdown) list.push({key:'countdown', label:'Countdown '+(mut.countdownSec || 30)+'s'});
   return list;
 }
+function runSetCampaignMutatorPanelOpen(open){
+  campaignMutatorPanelOpen=!!open;
+  if(campaignMutatorPanelEl){ campaignMutatorPanelEl.hidden=!campaignMutatorPanelOpen; }
+  if(campaignMutatorToggleEl){ campaignMutatorToggleEl.setAttribute('aria-expanded', campaignMutatorPanelOpen ? 'true' : 'false'); }
+}
+function runRenderCampaignMutatorTray(){
+  if(!campaignMutatorTrayEl) return;
+  var active=!!(state.mode==='campaign' && activeCampaign && $('#app') && $('#app').classList.contains('active'));
+  campaignMutatorTrayEl.hidden=!active;
+  if(!active){
+    runSetCampaignMutatorPanelOpen(false);
+    if(campaignMutatorSummaryEl){
+      campaignMutatorSummaryEl.textContent='Modifiers hidden until node entry.';
+      campaignMutatorSummaryEl.classList.remove('hint-rough','hint-brutal');
+    }
+    if(campaignMutatorHintEl){
+      campaignMutatorHintEl.textContent='';
+      campaignMutatorHintEl.classList.remove('hint-rough','hint-brutal');
+    }
+    if(campaignMutatorListEl){ campaignMutatorListEl.innerHTML=''; }
+    return;
+  }
+  var set=getCampaignSet(activeCampaign.setId);
+  var node=runResolveNodeForSet(set||null);
+  var mut=(state.campaignMutators && typeof state.campaignMutators==='object') ? state.campaignMutators : ((set && set.mutators) ? set.mutators : null);
+  var list=describeMutators(mut);
+  var hint=runMutatorThreatHint(mut, displayDifficulty(set||node||{}), node ? node.type : 'pack');
+  var summary=(list.length>0) ? ('Modifiers: '+list.length) : 'No active modifiers';
+  if(hint && hint.badge && hint.badge!=='UNKNOWN'){ summary += ' | ' + hint.badge; }
+  if(campaignMutatorSummaryEl){
+    campaignMutatorSummaryEl.textContent=summary;
+    campaignMutatorSummaryEl.classList.remove('hint-rough','hint-brutal');
+    if(hint.tier==='rough'){ campaignMutatorSummaryEl.classList.add('hint-rough'); }
+    if(hint.tier==='brutal'){ campaignMutatorSummaryEl.classList.add('hint-brutal'); }
+  }
+  if(campaignMutatorHintEl){
+    campaignMutatorHintEl.textContent=hint.text;
+    campaignMutatorHintEl.classList.remove('hint-rough','hint-brutal');
+    if(hint.tier==='rough'){ campaignMutatorHintEl.classList.add('hint-rough'); }
+    if(hint.tier==='brutal'){ campaignMutatorHintEl.classList.add('hint-brutal'); }
+  }
+  if(campaignMutatorListEl){
+    var strong={
+      countdown:true,
+      hotPotato:true,
+      minDistance:true,
+      copycat:true,
+      randomKeyboard:true,
+      drift:true,
+      phantomLetter:true,
+      bloodMirage:true
+    };
+    campaignMutatorListEl.innerHTML=(list.length ? list : [{key:'none',label:'No mutators'}]).map(function(item){
+      var cls='campaign-mutator-chip'+((strong[item.key] && item.key!=='none') ? ' strong' : '');
+      return '<span class=\"'+cls+'\">'+runShopEsc(item.label)+'</span>';
+    }).join('');
+  }
+  runSetCampaignMutatorPanelOpen(campaignMutatorPanelOpen);
+}
 function buildCampaignMenu(){
   ensureRunCampaign();
   if(!campaignNodesEl || !campaignSvg) return;
@@ -8417,6 +8655,8 @@ function buildCampaignMenu(){
     var available=(runCampaign.frontier||[]).indexOf(node.id)!==-1;
     var locked=!available && !completed && !saved;
     var isPackNode=runIsPackNodeType(node.type);
+    var detailsVisible=runNodeDetailsRevealed(node, {id:setId,nodeId:node.id,mutators:node.mutators});
+    var threatHint=runMutatorThreatHint(node.mutators || null, displayDifficulty(node||{}), node.type);
     var cls='map-node'+(locked?' locked':'')+(saved?' resume':'')+(completed?' complete':'');
     if(completed && isPackNode) cls+=' pack-complete';
     if(node.type==='upgrade') cls+=' upgrade-node';
@@ -8425,12 +8665,15 @@ function buildCampaignMenu(){
     else if(skipped) cls+=' teaser';
     var badge='';
     if(choiceLocked){ badge='CHOICE LOCKED'; }
+    else if(isPackNode && !detailsVisible){
+      badge = (threatHint.tier==='brutal') ? 'WARNING: BRUTAL' : ((threatHint.tier==='rough') ? 'WARNING' : 'UNKNOWN');
+    }
     else if(completed && isPackNode){
       badge = (node.type==='boss') ? 'BOSS CLEARED' : (node.type==='elite' ? 'ELITE CLEARED' : 'PACK CLEARED');
     }else{
       badge=((node.type==='upgrade')?'UPGRADE':(node.type==='boss'?'BOSS':(node.type==='elite'?'ELITE':(displayDifficulty(node)||'').toUpperCase())));
     }
-    var title=node.title || node.id;
+    var title=(isPackNode && !detailsVisible) ? runObscuredNodeTitle(node) : (node.title || node.id);
     var btn=document.createElement('button');
     btn.className=cls;
     btn.setAttribute('data-set', node.id);
@@ -8443,6 +8686,8 @@ function buildCampaignMenu(){
       btn.title='Resume';
     }else if(completed){
       btn.title=isPackNode ? 'Completed pack' : 'Completed';
+    }else if(isPackNode && !detailsVisible){
+      btn.title=threatHint.text;
     }else{
       btn.title='Start';
     }
@@ -8564,6 +8809,10 @@ function beginCampaignWord(set, index){
   if(!w) return;
   activeCampaign={setId:set.id, index:index, nodeId:set.nodeId || runNodeFromSetId(set.id), wordApproved:!!runWordReview.approved[w]};
   runCampaign.activeNodeId=activeCampaign.nodeId || null;
+  if(activeCampaign.nodeId){
+    if(!runCampaign.revealed || typeof runCampaign.revealed!=='object'){ runCampaign.revealed={}; }
+    runCampaign.revealed[activeCampaign.nodeId]=true;
+  }
   runSave();
   state.mode='campaign';
   state.pendingCampaignTimeout=false;
@@ -8580,6 +8829,7 @@ function beginCampaignWord(set, index){
   state.difficulty=set.difficulty;
   state.enforce=true;
   buildBoard(false);
+  runRenderCampaignMutatorTray();
   saveSession();
   if(entry.starter){ seedStarterGuess(entry.starter); }
   requestAnimationFrame(playCampaignIntroAnimation);
@@ -8676,6 +8926,11 @@ function startCampaign(nodeId){
         toast('Skipped '+lockedUpgrades+' upgrade'+(lockedUpgrades===1?'':'s')+'. -'+lockedUpgrades+' guess'+(lockedUpgrades===1?'':'es')+' this node.');
       }
     }
+    if(runIsPackNodeType(node.type)){
+      if(!runCampaign.revealed || typeof runCampaign.revealed!=='object'){ runCampaign.revealed={}; }
+      runCampaign.revealed[node.id]=true;
+      runSave();
+    }
     menuScreen.classList.remove('active');
     campaignMenuScreen.classList.remove('active');
     $('#app').classList.add('active');
@@ -8697,6 +8952,8 @@ function startCampaign(nodeId){
       var resumeWord=lettersOnlyUpper(resumeEntry.word || '');
       activeCampaign={setId:set.id, index:resumeIdx, nodeId:node.id, wordApproved:!!(resumeWord && runWordReview.approved[resumeWord])};
       runCampaign.activeNodeId=node.id;
+      if(!runCampaign.revealed || typeof runCampaign.revealed!=='object'){ runCampaign.revealed={}; }
+      runCampaign.revealed[node.id]=true;
       runSave();
       state.campaignMutators=normalizeMutators(set.mutators || savedSession.campaignMutators || null);
       state.campaignMutators.lifelineCount=clampLifeCount(state.campaignMutators.lifelineCount);
@@ -8708,6 +8965,7 @@ function startCampaign(nodeId){
       applySessionProgress(savedSession);
       applyCampaignResumeDecay(savedSession);
       buildBoard(true);
+      runRenderCampaignMutatorTray();
       if(state.pendingCampaignTimeout){
         state.pendingCampaignTimeout=false;
         setTimeout(function(){ failCampaignLevel('Time expired while away.'); }, 80);
@@ -8722,12 +8980,16 @@ function startCampaign(nodeId){
 }
 function updateCampaignProgress(){
   var el=$('#campaignProgress');
-  if(!el) return;
+  if(!el){
+    runRenderCampaignMutatorTray();
+    return;
+  }
   if(state.mode!=='campaign' || !activeCampaign){
     el.textContent='';
     el.classList.remove('approved-word');
     el.removeAttribute('title');
     el.removeAttribute('aria-label');
+    runRenderCampaignMutatorTray();
     return;
   }
   ensureRunCampaign();
@@ -8737,6 +8999,7 @@ function updateCampaignProgress(){
     el.classList.remove('approved-word');
     el.removeAttribute('title');
     el.removeAttribute('aria-label');
+    runRenderCampaignMutatorTray();
     return;
   }
   var seg='Cluster '+runCampaign.cluster+' ';
@@ -8766,6 +9029,7 @@ function updateCampaignProgress(){
   }
 
   el.textContent=seg;
+  runRenderCampaignMutatorTray();
 }
 
 function showMenu(){
@@ -8926,6 +9190,18 @@ sandboxBtn.addEventListener('click', startSandbox);
 if(hotseatBtn){ hotseatBtn.addEventListener('click', openHotseatLobby); }
 if(wordReviewBtn){ wordReviewBtn.addEventListener('click', openWordReviewModal); }
 menuBtn.addEventListener('click', showMenu);
+if(campaignMutatorToggleEl){
+  campaignMutatorToggleEl.addEventListener('click', function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    runSetCampaignMutatorPanelOpen(!campaignMutatorPanelOpen);
+  });
+}
+document.addEventListener('click', function(e){
+  if(!campaignMutatorPanelOpen || !campaignMutatorTrayEl) return;
+  if(campaignMutatorTrayEl.contains(e.target)) return;
+  runSetCampaignMutatorPanelOpen(false);
+});
 campaignOpenBtn.addEventListener('click', showCampaignMenu);
 campaignBackBtn.addEventListener('click', showMenu);
 menuFsBtn.addEventListener('click', function(){ var b=$('#btnFS'); if(b) b.click(); });
