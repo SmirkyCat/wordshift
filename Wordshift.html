@@ -5159,6 +5159,12 @@ function runWordReviewCanMutate(notify){
   }
   return true;
 }
+function runWordReviewPreferNonPlural(word){
+  var w=lettersOnlyUpper(word||'');
+  if(!w) return false;
+  // Design choice: treat any S-ending word as plural-leaning for queue priority.
+  return w.charAt(w.length-1)!=='S';
+}
 function runPickWordReviewBatch(count, exclude){
   count=clamp(safeInt(count,5),1,50);
   var blocked={};
@@ -5172,34 +5178,44 @@ function runPickWordReviewBatch(count, exclude){
   var stats=runWordReviewStats({includePendingWords:true});
   while(out.length<count){
     var choices=[];
+    var hasPreferred=false;
     for(var i=0;i<stats.lengths.length;i++){
       var row=stats.lengths[i];
       var pendingWords=row.pendingWords || [];
       if(!pendingWords.length) continue;
       var available=pendingWords.filter(function(w){ return !blocked[w]; });
       if(!available.length) continue;
+      var preferred=available.filter(runWordReviewPreferNonPlural);
+      if(preferred.length) hasPreferred=true;
       choices.push({
         len:row.len,
         source:row.source,
         approved:row.approved,
         pending:row.pending,
         total:row.total,
-        available:available
+        available:available,
+        preferred:preferred
       });
     }
     if(!choices.length) break;
+    if(hasPreferred){
+      choices=choices.filter(function(c){ return c.preferred && c.preferred.length; });
+      if(!choices.length) break;
+    }
     var minApproved=999999;
     for(var j=0;j<choices.length;j++){
       if(choices[j].approved<minApproved) minApproved=choices[j].approved;
     }
     var prioritized=choices.filter(function(c){ return c.approved===minApproved; });
+    var poolKey=hasPreferred ? 'preferred' : 'available';
     var maxAvailable=0;
     for(var k=0;k<prioritized.length;k++){
-      if(prioritized[k].available.length>maxAvailable) maxAvailable=prioritized[k].available.length;
+      var size=(prioritized[k][poolKey]||[]).length;
+      if(size>maxAvailable) maxAvailable=size;
     }
-    var narrowed=prioritized.filter(function(c){ return c.available.length===maxAvailable; });
+    var narrowed=prioritized.filter(function(c){ return ((c[poolKey]||[]).length===maxAvailable); });
     var choice=narrowed[(Math.random()*narrowed.length)|0];
-    var list=choice.available;
+    var list=choice[poolKey] || choice.available;
     var pick=list[(Math.random()*list.length)|0];
     blocked[pick]=true;
     out.push({word:pick, len:choice.len, source:choice.source||'unknown'});
