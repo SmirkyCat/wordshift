@@ -105,10 +105,13 @@
     var headers = Object.assign({ "Content-Type": "application/json; charset=utf-8" }, init.headers || {});
     var res = await fetch(API_BASE + path, Object.assign({}, init, { headers: headers, cache: "no-store" }));
     var data = {};
+    var raw = "";
     try {
-      data = await res.json();
+      raw = await res.text();
+      data = raw ? JSON.parse(raw) : {};
     } catch (_) {
-      data = { ok: false, error: "Invalid server response." };
+      var hint = raw ? (" | " + String(raw).slice(0, 160)) : "";
+      data = { ok: false, error: "HTTP " + res.status + " non-JSON response" + hint };
     }
     if (!res.ok || !data || data.ok === false) {
       var err = new Error((data && data.error) || ("HTTP " + res.status));
