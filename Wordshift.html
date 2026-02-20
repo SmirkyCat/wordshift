@@ -686,10 +686,16 @@ body.mode-campaign .campaign-mutator-tray{display:flex}
   background:rgba(255,255,255,.06);
   color:rgba(235,241,255,.95);
   padding:4px 8px;
+  cursor:pointer;
+  user-select:none;
 }
 .campaign-mutator-chip.strong{
   border-color:rgba(255,132,132,.62);
   background:rgba(140,30,30,.28);
+}
+.campaign-mutator-chip:focus-visible{
+  outline:2px solid rgba(140,176,255,.9);
+  outline-offset:1px;
 }
 #guessLeft{
   position:absolute;left:50%;bottom:6px;transform:translate(-50%, 0);pointer-events:none;
@@ -8800,7 +8806,10 @@ function updateCampaignIntroMeta(set, meta){
   if(run.upgrades && run.upgrades.length){
     var upTags=run.upgrades.map(function(id){
       var up=runGetUpgrade(id);
-      return up ? up.label : id;
+      if(up){
+        return {label:up.label, help:up.desc || ''};
+      }
+      return {label:id, help:'Unknown upgrade id: '+id};
     });
     addIntroItem(meta,'Run Upgrades', upTags);
   }else{
@@ -8809,20 +8818,40 @@ function updateCampaignIntroMeta(set, meta){
   if(run.clusterTraits && run.clusterTraits.length){
     var traitTags=run.clusterTraits.map(function(id){
       var tr=runGetClusterTrait(id);
-      return tr ? tr.label : id;
+      if(tr){
+        var tip='Upside: '+(tr.up || 'None')+' Downside: '+(tr.down || 'None');
+        return {label:tr.label, help:tip};
+      }
+      return {label:id, help:'Unknown trait id: '+id};
     });
     addIntroItem(meta,'Cluster Traits', traitTags);
   }
   if(run.tempBuffs){
     var buffs=[];
-    if(run.tempBuffs.guess){ buffs.push('Guess +'+run.tempBuffs.guess); }
-    if(run.tempBuffs.lifeline){ buffs.push('Lifeline +'+run.tempBuffs.lifeline); }
-    if(run.tempBuffs.countdown){ buffs.push('Countdown +'+run.tempBuffs.countdown+'s'); }
-    if(run.tempBuffs.budget){ buffs.push('Budget +'+run.tempBuffs.budget); }
-    if(run.tempBuffs.reward){ buffs.push('Reward +'+run.tempBuffs.reward); }
-    if(run.tempBuffs.signalClean){ buffs.push('Signal Clean'); }
-    if(run.tempBuffs.minDistanceRelief){ buffs.push('Min Dist -'+run.tempBuffs.minDistanceRelief); }
-    if(run.tempBuffs.wildcard){ buffs.push('Wildcard On'); }
+    if(run.tempBuffs.guess){
+      buffs.push({label:'Guess +'+run.tempBuffs.guess, help:'Adds +'+run.tempBuffs.guess+' max guess(es) on each node this cluster.'});
+    }
+    if(run.tempBuffs.lifeline){
+      buffs.push({label:'Lifeline +'+run.tempBuffs.lifeline, help:'Adds +'+run.tempBuffs.lifeline+' lifeline use(s) on each node this cluster.'});
+    }
+    if(run.tempBuffs.countdown){
+      buffs.push({label:'Countdown +'+run.tempBuffs.countdown+'s', help:'Extends countdown timers by '+run.tempBuffs.countdown+' seconds this cluster.'});
+    }
+    if(run.tempBuffs.budget){
+      buffs.push({label:'Budget +'+run.tempBuffs.budget, help:'Adds '+run.tempBuffs.budget+' budget points when budget mutator is active this cluster.'});
+    }
+    if(run.tempBuffs.reward){
+      buffs.push({label:'Reward +'+run.tempBuffs.reward, help:'Adds +'+run.tempBuffs.reward+' coin reward per node this cluster.'});
+    }
+    if(run.tempBuffs.signalClean){
+      buffs.push({label:'Signal Clean', help:'Removes Noisy Arrows and Phantom Letter mutators this cluster.'});
+    }
+    if(run.tempBuffs.minDistanceRelief){
+      buffs.push({label:'Min Dist -'+run.tempBuffs.minDistanceRelief, help:'Reduces Minimum Distance requirement by '+run.tempBuffs.minDistanceRelief+' this cluster.'});
+    }
+    if(run.tempBuffs.wildcard){
+      buffs.push({label:'Wildcard On', help:'Forces Wildcard mutator on for this cluster.'});
+    }
     if(buffs.length){ addIntroItem(meta,'Cluster Buffs', buffs); }
   }
 }
@@ -8849,6 +8878,24 @@ function describeMutators(mut){
   if(mut.minDistance) list.push({key:'minDistance', label:'Min Distance '+clampMinDistance(mut.minDistanceVal)});
   if(mut.countdown) list.push({key:'countdown', label:'Countdown '+(mut.countdownSec || 30)+'s'});
   return list;
+}
+function runMutatorHelpText(key, mut){
+  if(!key || key==='none') return 'No active mutator.';
+  var base=MUTATOR_HELP[key] || 'Mutator active for this level.';
+  mut=mut || {};
+  if(key==='budget' && mut.budget){
+    base += ' Current budget: '+clampBudget(mut.budgetPoints)+' LP.';
+  }else if(key==='lifeline' && mut.lifeline){
+    base += ' Current uses: '+clampLifeCount(mut.lifelineCount)+'.';
+  }else if(key==='copycat' && mut.copycat){
+    base += ' Required overlap: '+Math.max(1,safeInt(mut.copycatMin,2))+' letters.';
+  }else if(key==='minDistance' && mut.minDistance){
+    base += ' Minimum total: '+clampMinDistance(mut.minDistanceVal)+'.';
+  }else if(key==='countdown' && mut.countdown){
+    base += ' Timer: '+Math.max(1,safeInt(mut.countdownSec,30))+'s';
+    base += ' with +'+clamp(safeInt(mut.countdownKeyCenti,0),0,50)/10+'s per key.';
+  }
+  return base;
 }
 function runSetCampaignMutatorPanelOpen(open){
   campaignMutatorPanelOpen=!!open;
@@ -8904,7 +8951,8 @@ function runRenderCampaignMutatorTray(){
     };
     campaignMutatorListEl.innerHTML=(list.length ? list : [{key:'none',label:'No mutators'}]).map(function(item){
       var cls='campaign-mutator-chip'+((strong[item.key] && item.key!=='none') ? ' strong' : '');
-      return '<span class=\"'+cls+'\">'+runShopEsc(item.label)+'</span>';
+      var help=runEscHtml(runMutatorHelpText(item.key, mut));
+      return '<span class=\"'+cls+'\" data-help=\"'+help+'\" role=\"button\" tabindex=\"0\" title=\"Tap for details\">'+runShopEsc(item.label)+'</span>';
     }).join('');
   }
   runSetCampaignMutatorPanelOpen(campaignMutatorPanelOpen);
@@ -9480,6 +9528,22 @@ if(campaignMutatorToggleEl){
     e.preventDefault();
     e.stopPropagation();
     runSetCampaignMutatorPanelOpen(!campaignMutatorPanelOpen);
+  });
+}
+if(campaignMutatorListEl){
+  campaignMutatorListEl.addEventListener('click', function(e){
+    var chip=(e.target.closest && e.target.closest('.campaign-mutator-chip[data-help]')) ? e.target.closest('.campaign-mutator-chip[data-help]') : null;
+    if(!chip) return;
+    var msg=String(chip.getAttribute('data-help') || '').trim();
+    if(msg) toast(msg, 2600);
+  });
+  campaignMutatorListEl.addEventListener('keydown', function(e){
+    if(e.key!=='Enter' && e.key!==' ') return;
+    var chip=(e.target.closest && e.target.closest('.campaign-mutator-chip[data-help]')) ? e.target.closest('.campaign-mutator-chip[data-help]') : null;
+    if(!chip) return;
+    e.preventDefault();
+    var msg=String(chip.getAttribute('data-help') || '').trim();
+    if(msg) toast(msg, 2600);
   });
 }
 window.addEventListener('touchstart', function(e){
