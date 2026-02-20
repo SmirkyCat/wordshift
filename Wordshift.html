@@ -6587,8 +6587,96 @@ async function runBindWordReviewFile(){
     return false;
   }
   if(!window.isSecureContext || !window.showOpenFilePicker){
-    toast('Direct file writing is not supported here. Use Save Now for cloud sync.');
-    return false;
+    return new Promise(function(resolve){
+      try{
+        var picker=document.createElement('input');
+        picker.type='file';
+        picker.accept='.json,application/json';
+        picker.style.position='fixed';
+        picker.style.left='-9999px';
+        picker.style.top='-9999px';
+        document.body.appendChild(picker);
+        var cleaned=false;
+        function cleanup(){
+          if(cleaned) return;
+          cleaned=true;
+          try{ picker.value=''; }catch(_){}
+          try{ document.body.removeChild(picker); }catch(_){}
+        }
+        function fail(msg, err){
+          runWordReviewFileSync.lastError=String(msg||'import failed');
+          toast('Could not load JSON file.');
+          if(err) console.error(err);
+          runRenderWordReview(false);
+          cleanup();
+          resolve(false);
+        }
+        function applyRaw(rawText, fileName){
+          var parsed={};
+          try{
+            parsed=JSON.parse(String(rawText||'{}'));
+          }catch(e){
+            fail('Invalid JSON in '+fileName, e);
+            return;
+          }
+          var normalized=runNormalizeWordReview(parsed);
+          runWordReviewFile=runNormalizeWordReview({
+            approved:Object.keys(normalized.approved),
+            rejected:Object.keys(normalized.rejected)
+          });
+          runWordReviewLocal=runNormalizeWordReview(null);
+          runWordReviewSave();
+          runRebuildWordReview();
+          runInvalidateWordReviewSearchIndex();
+          runWordReviewNeedsInitialLoad=false;
+          runWordReviewFileMeta={
+            url:fileName || 'uploaded file',
+            loaded:true,
+            lastError:''
+          };
+          runWordReviewFileHandle=null;
+          runWordReviewFileSync.lastTarget=fileName || 'uploaded file';
+          runWordReviewFileSync.lastOk=Date.now();
+          runWordReviewFileSync.lastError='';
+          toast('Loaded JSON file: '+(fileName||'campaign_words.json'));
+          runRenderWordReview(false);
+          cleanup();
+          resolve(true);
+        }
+        picker.addEventListener('change', function(){
+          var file=(picker.files && picker.files[0]) ? picker.files[0] : null;
+          if(!file){
+            cleanup();
+            resolve(false);
+            return;
+          }
+          var fileName=String(file.name||'campaign_words.json');
+          if(file.text){
+            file.text().then(function(text){
+              applyRaw(text, fileName);
+            }).catch(function(err){
+              fail('Read failed', err);
+            });
+            return;
+          }
+          try{
+            var reader=new FileReader();
+            reader.onload=function(){ applyRaw(reader.result, fileName); };
+            reader.onerror=function(e){ fail('Read failed', e); };
+            reader.readAsText(file);
+          }catch(e){
+            fail('Read failed', e);
+          }
+        }, {once:true});
+        picker.click();
+      }catch(e){
+        runWordReviewFileSync.lastError=String((e && e.message) || e || 'import init failed');
+        toast('Could not open file picker.');
+        runRenderWordReview(false);
+        console.error(e);
+        resolve(false);
+      }
+    });
   }
   try{
     var handles=await window.showOpenFilePicker({
@@ -6785,9 +6873,12 @@ function runUpdateWordReviewControls(){
   var supportsFile=!!(window.isSecureContext && window.showOpenFilePicker);
   var authed=!!runWordReviewAuthed;
   if(wrBindFileBtn){
-    wrBindFileBtn.style.display = supportsFile ? '' : 'none';
+    wrBindFileBtn.style.display = '';
+    wrBindFileBtn.textContent = supportsFile ? 'Bind JSON File' : 'Load JSON File';
     wrBindFileBtn.disabled = !authed;
-    wrBindFileBtn.title = authed ? '' : 'Authenticate in Options first.';
+    var bindTitle = supportsFile ? '' : 'Load a JSON file into the review editor. Save writes to cloud on this browser.';
+    if(!authed){ bindTitle = (bindTitle ? (bindTitle + ' ') : '') + 'Authenticate in Options first.'; }
+    wrBindFileBtn.title = bindTitle;
   }
   if(wrSaveFileBtn){
     wrSaveFileBtn.textContent = supportsFile ? 'Save Now' : 'Save to Cloud';
