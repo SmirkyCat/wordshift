@@ -1,6 +1,8 @@
-const CACHE_VERSION = 'wordshift-pwa-v2';
+const CACHE_VERSION = 'wordshift-pwa-v3';
 const APP_SHELL = [
   './Wordshift.html',
+  './multiplayer.js',
+  './multiplayer.css',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
@@ -9,6 +11,7 @@ const APP_SHELL = [
 
 function isDynamicApi(url) {
   if (url.pathname.startsWith('/.netlify/functions/')) return true;
+  if (/^\/api\/lobbies(?:\/|$)/.test(url.pathname)) return true;
   return /^\/api\/word-review(?:\/|$)/.test(url.pathname);
 }
 

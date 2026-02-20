@@ -3,6 +3,24 @@
   "name": "wordshift",
   "pages_build_output_dir": ".",
   "compatibility_date": "2026-02-20",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "LOBBY_DIRECTORY",
+        "class_name": "LobbyDirectoryDO"
+      },
+      {
+        "name": "LOBBY_ROOM",
+        "class_name": "LobbyRoomDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "wordshift-mp-v1",
+      "new_classes": ["LobbyDirectoryDO", "LobbyRoomDO"]
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",
