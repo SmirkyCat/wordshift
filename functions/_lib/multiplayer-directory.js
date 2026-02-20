@@ -1,16 +1,12 @@
 import {
   VERSION,
   ROOM_IDLE_TIMEOUT_MS,
-  HUMAN_CHALLENGE_TTL_MS,
-  HUMAN_CHALLENGE_LIMIT,
   MIN_PLAYERS,
   MAX_PLAYERS,
   DEFAULT_MAX_PLAYERS,
   json,
   nowMs,
   clampInt,
-  randomInt,
-  randomToken,
   sanitizeRoomId,
   sanitizeRoomName,
   sanitizeMutatorList,
@@ -25,14 +21,11 @@ export class LobbyDirectoryDO {
   constructor(state, env) {
     this.state = state;
     this.env = env;
-    this.registry = { rooms: {}, challenges: {} };
+    this.registry = { rooms: {} };
     this.ready = this.state.blockConcurrencyWhile(async () => {
       const stored = await this.state.storage.get("registry_v1");
       if (stored && typeof stored === "object") this.registry = stored;
       if (!this.registry.rooms || typeof this.registry.rooms !== "object") this.registry.rooms = {};
-      if (!this.registry.challenges || typeof this.registry.challenges !== "object") {
-        this.registry.challenges = {};
-      }
     });
   }
 
@@ -41,29 +34,7 @@ export class LobbyDirectoryDO {
   }
 
   cleanupRegistry() {
-    const now = nowMs();
     let changed = false;
-
-    const challenges = this.registry.challenges || {};
-    const challengeIds = Object.keys(challenges);
-    if (challengeIds.length > HUMAN_CHALLENGE_LIMIT) {
-      const ordered = challengeIds
-        .map((id) => ({ id, createdAt: Number(challenges[id] && challenges[id].createdAt) || 0 }))
-        .sort((a, b) => a.createdAt - b.createdAt);
-      const removeCount = ordered.length - HUMAN_CHALLENGE_LIMIT;
-      for (let i = 0; i < removeCount; i += 1) {
-        delete challenges[ordered[i].id];
-        changed = true;
-      }
-    }
-    for (const id of Object.keys(challenges)) {
-      const entry = challenges[id];
-      if (!entry || now > Number(entry.expiresAt || 0)) {
-        delete challenges[id];
-        changed = true;
-      }
-    }
-
     const rooms = this.registry.rooms || {};
     for (const roomId of Object.keys(rooms)) {
       const meta = rooms[roomId];
@@ -80,56 +51,87 @@ export class LobbyDirectoryDO {
     return changed;
   }
 
-  issueChallenge() {
-    let left = 0;
-    let right = 0;
-    let answer = 0;
-    let prompt = "";
-
-    if (randomInt(2) === 0) {
-      left = randomInt(8) + 2;
-      right = randomInt(8) + 1;
-      answer = left + right;
-      prompt = `${left} + ${right}`;
-    } else {
-      left = randomInt(8) + 2;
-      right = randomInt(left - 1) + 1;
-      answer = left - right;
-      prompt = `${left} - ${right}`;
-    }
-
-    const challengeId = randomToken(18);
-    this.registry.challenges[challengeId] = {
-      answer: String(answer),
-      createdAt: nowMs(),
-      expiresAt: nowMs() + HUMAN_CHALLENGE_TTL_MS
-    };
-    return {
-      challengeId,
-      prompt: `${prompt} = ?`,
-      expiresInMs: HUMAN_CHALLENGE_TTL_MS
-    };
-  }
-
-  consumeChallenge(challengeId, challengeAnswer) {
-    const id = String(challengeId || "").trim();
-    const answer = String(challengeAnswer || "").trim();
-    if (!id || !answer) return { ok: false, error: "Human verification is required." };
-    const entry = this.registry.challenges[id];
-    if (!entry) return { ok: false, error: "Verification challenge missing or expired." };
-    delete this.registry.challenges[id];
-    if (nowMs() > Number(entry.expiresAt || 0)) {
-      return { ok: false, error: "Verification challenge expired. Try again." };
-    }
-    if (answer !== String(entry.answer || "")) {
-      return { ok: false, error: "Verification answer is incorrect." };
-    }
-    return { ok: true };
-  }
-
   roomStub(roomId) {
     const id = this.env.LOBBY_ROOM.idFromName(`room-${roomId}`);
     return this.env.LOBBY_ROOM.get(id);
+  }
+
+  turnstileConfig() {
+    const siteKey = String((this.env && this.env.TURNSTILE_SITE_KEY) || "").trim();
+    const secretKey = String((this.env && this.env.TURNSTILE_SECRET_KEY) || "").trim();
+    return {
+      siteKey,
+      secretKey,
+      enabled: !!(siteKey && secretKey)
+    };
+  }
+
+  getClientIp(request) {
+    const ip = String(
+      (request && request.headers && request.headers.get("cf-connecting-ip")) ||
+        (request && request.headers && request.headers.get("x-forwarded-for")) ||
+        ""
+    )
+      .split(",")[0]
+      .trim();
+    return ip || "";
+  }
+
+  async verifyTurnstile(request, token) {
+    const cfg = this.turnstileConfig();
+    if (!cfg.enabled) {
+      return {
+        ok: false,
+        statusCode: 503,
+        error: "Human verification is not configured on server.",
+        code: "TURNSTILE_NOT_CONFIGURED"
+      };
+    }
+
+    const responseToken = String(token || "").trim();
+    if (!responseToken) {
+      return {
+        ok: false,
+        statusCode: 400,
+        error: "Complete human verification before continuing.",
+        code: "HUMAN_CHECK_FAILED"
+      };
+    }
+
+    const form = new URLSearchParams();
+    form.set("secret", cfg.secretKey);
+    form.set("response", responseToken);
+    const ip = this.getClientIp(request);
+    if (ip) form.set("remoteip", ip);
+
+    let response = null;
+    let payload = null;
+    try {
+      response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+        method: "POST",
+        body: form
+      });
+      payload = await response.json();
+    } catch (_) {
+      return {
+        ok: false,
+        statusCode: 502,
+        error: "Could not verify human check token.",
+        code: "TURNSTILE_VERIFY_FAILED"
+      };
+    }
+
+    if (!response.ok || !payload || payload.success !== true) {
+      return {
+        ok: false,
+        statusCode: 400,
+        error: "Human verification failed.",
+        code: "HUMAN_CHECK_FAILED",
+        details: payload && payload["error-codes"] ? payload["error-codes"] : []
+      };
+    }
+
+    return { ok: true };
   }
 
   async proxyRoomState(roomId, sessionToken) {
@@ -176,6 +178,15 @@ export class LobbyDirectoryDO {
     return json(200, { ok: true, version: VERSION, timeoutMs: ROOM_IDLE_TIMEOUT_MS, rooms, now: nowMs() });
   }
 
+  async handleChallenge() {
+    const cfg = this.turnstileConfig();
+    return json(200, {
+      ok: true,
+      turnstileEnabled: !!cfg.enabled,
+      siteKey: cfg.siteKey || ""
+    });
+  }
+
   async handleNameValidate(request) {
     const body = (await parseJsonRequest(request)) || {};
     const check = await validateCampaignName(this.env, body.name);
@@ -184,17 +195,20 @@ export class LobbyDirectoryDO {
 
   async handleCreate(request) {
     const body = (await parseJsonRequest(request)) || {};
-    const challenge = this.consumeChallenge(body.challengeId, body.challengeAnswer);
-    if (!challenge.ok) {
-      await this.save();
-      return json(400, { ok: false, error: challenge.error, code: "HUMAN_CHECK_FAILED" });
+    const human = await this.verifyTurnstile(request, body.turnstileToken);
+    if (!human.ok) {
+      return json(human.statusCode || 400, {
+        ok: false,
+        error: human.error,
+        code: human.code,
+        details: human.details || []
+      });
     }
 
     const mode = String(body.mode || "ranked").toLowerCase() === "custom" ? "custom" : "ranked";
     const maxPlayers = clampInt(body.maxPlayers, MIN_PLAYERS, MAX_PLAYERS, DEFAULT_MAX_PLAYERS);
     const roomId = makeRoomId(this.registry.rooms || {});
     if (!roomId) {
-      await this.save();
       return json(503, { ok: false, error: "Unable to allocate room id. Retry shortly." });
     }
 
@@ -214,7 +228,6 @@ export class LobbyDirectoryDO {
     });
     const payload = await parseJsonResponse(response);
     if (!response.ok || !payload || !payload.ok) {
-      await this.save();
       return json(response.status || 500, payload || { ok: false, error: "Failed to create room." });
     }
 
@@ -225,17 +238,18 @@ export class LobbyDirectoryDO {
 
   async handleJoin(request) {
     const body = (await parseJsonRequest(request)) || {};
-    const challenge = this.consumeChallenge(body.challengeId, body.challengeAnswer);
-    if (!challenge.ok) {
-      await this.save();
-      return json(400, { ok: false, error: challenge.error, code: "HUMAN_CHECK_FAILED" });
+    const human = await this.verifyTurnstile(request, body.turnstileToken);
+    if (!human.ok) {
+      return json(human.statusCode || 400, {
+        ok: false,
+        error: human.error,
+        code: human.code,
+        details: human.details || []
+      });
     }
 
     const roomId = sanitizeRoomId(body.roomId);
-    if (!roomId) {
-      await this.save();
-      return json(400, { ok: false, error: "Invalid room id." });
-    }
+    if (!roomId) return json(400, { ok: false, error: "Invalid room id." });
 
     const response = await this.roomStub(roomId).fetch("https://room.internal/room/join", {
       method: "POST",
@@ -283,11 +297,7 @@ export class LobbyDirectoryDO {
     if (this.cleanupRegistry()) await this.save();
 
     if (method === "GET" && path === "/api/lobbies/list") return this.handleList();
-    if (method === "POST" && path === "/api/lobbies/challenge") {
-      const challenge = this.issueChallenge();
-      await this.save();
-      return json(200, { ok: true, ...challenge });
-    }
+    if (method === "POST" && path === "/api/lobbies/challenge") return this.handleChallenge();
     if (method === "POST" && path === "/api/lobbies/name/validate") return this.handleNameValidate(request);
     if (method === "POST" && path === "/api/lobbies/create") return this.handleCreate(request);
     if (method === "POST" && path === "/api/lobbies/join") return this.handleJoin(request);

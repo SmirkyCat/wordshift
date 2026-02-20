@@ -8660,11 +8660,9 @@ function runSetIdForNode(node){
 function runNodeDetailsRevealed(node, set){
   if(!node || !runIsPackNodeType(node.type)) return true;
   var run=ensureRunCampaign();
-  var setId=(set && set.id) ? set.id : runSetIdForNode(node);
   if(node.id && run.activeNodeId===node.id) return true;
   if(node.id && run.revealed && run.revealed[node.id]) return true;
   if(node.id && run.completed && run.completed[node.id]) return true;
-  if(setId && load(campaignKey(setId), null)) return true;
   return false;
 }
 function runMutatorThreatScore(mut, displayDiff, nodeType){

@@ -17,7 +17,6 @@ import {
   roomPublicState,
   isIdleExpired,
   parseJsonRequest,
-  loadApprovedPool,
   validateCampaignName,
   pickRandomCampaignName,
   pickTargetWord
@@ -299,10 +298,6 @@ export class LobbyRoomDO {
       const guess = normalizeWord(body.guess);
       if (!guess || guess.length !== this.room.wordLength) {
         return json(400, { ok: false, error: `Guess must be ${this.room.wordLength} letters.` });
-      }
-      const pool = await loadApprovedPool(this.env);
-      if (!pool.set.has(guess)) {
-        return json(400, { ok: false, error: "Guess must be an approved campaign word." });
       }
       const mask = scoreGuess(guess, this.room.targetWord || "");
       player.guessCount = (player.guessCount || 0) + 1;

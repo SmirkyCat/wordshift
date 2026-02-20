@@ -38,7 +38,9 @@
     roomId: "",
     sessionToken: "",
     roomData: null,
-    nameReqId: 0
+    nameReqId: 0,
+    turnstileScriptPromise: null,
+    humanCheckCtx: null
   };
 
   function $(id) {
@@ -122,14 +124,113 @@
     return data;
   }
 
+  async function ensureTurnstileScript() {
+    if (window.turnstile && typeof window.turnstile.render === "function") return;
+    if (state.turnstileScriptPromise) {
+      await state.turnstileScriptPromise;
+      return;
+    }
+    state.turnstileScriptPromise = new Promise(function (resolve, reject) {
+      var existing = $("mpTurnstileScript");
+      if (existing) {
+        existing.addEventListener("load", function () { resolve(); }, { once: true });
+        existing.addEventListener("error", function () { reject(new Error("Turnstile script failed to load.")); }, { once: true });
+        return;
+      }
+      var script = document.createElement("script");
+      script.id = "mpTurnstileScript";
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      script.async = true;
+      script.defer = true;
+      script.onload = function () { resolve(); };
+      script.onerror = function () { reject(new Error("Turnstile script failed to load.")); };
+      document.head.appendChild(script);
+    });
+    await state.turnstileScriptPromise;
+  }
+
+  function closeHumanModal(reason) {
+    var modal = $("mpHumanModal");
+    var widget = $("mpTurnstileWidget");
+    var status = $("mpHumanStatus");
+    var confirmBtn = $("mpHumanConfirm");
+
+    if (modal) modal.classList.remove("open");
+    if (confirmBtn) confirmBtn.disabled = true;
+    if (status) status.textContent = "Complete verification to continue.";
+
+    var ctx = state.humanCheckCtx;
+    if (ctx && window.turnstile && typeof window.turnstile.remove === "function" && ctx.widgetId !== null) {
+      try { window.turnstile.remove(ctx.widgetId); } catch (_) { }
+    }
+    if (widget) widget.innerHTML = "";
+    state.humanCheckCtx = null;
+    return { ctx: ctx, reason: reason || "Cancelled." };
+  }
+
+  async function openHumanModal(siteKey) {
+    var modal = $("mpHumanModal");
+    var widget = $("mpTurnstileWidget");
+    var status = $("mpHumanStatus");
+    var confirmBtn = $("mpHumanConfirm");
+    if (!modal || !widget || !status || !confirmBtn) {
+      throw new Error("Human verification UI is missing.");
+    }
+    if (!window.turnstile || typeof window.turnstile.render !== "function") {
+      throw new Error("Turnstile is unavailable.");
+    }
+
+    if (state.humanCheckCtx && state.humanCheckCtx.reject) {
+      var prev = closeHumanModal("Cancelled.");
+      prev.ctx.reject(new Error(prev.reason));
+    }
+
+    return new Promise(function (resolve, reject) {
+      state.humanCheckCtx = { resolve: resolve, reject: reject, token: "", widgetId: null };
+      status.textContent = "Complete verification to continue.";
+      confirmBtn.disabled = true;
+      modal.classList.add("open");
+      widget.innerHTML = "";
+      try {
+        var id = window.turnstile.render(widget, {
+          sitekey: siteKey,
+          theme: "dark",
+          callback: function (token) {
+            if (!state.humanCheckCtx) return;
+            state.humanCheckCtx.token = String(token || "");
+            confirmBtn.disabled = !state.humanCheckCtx.token;
+            status.textContent = state.humanCheckCtx.token
+              ? "Verification complete. Press Continue."
+              : "Complete verification to continue.";
+          },
+          "expired-callback": function () {
+            if (!state.humanCheckCtx) return;
+            state.humanCheckCtx.token = "";
+            confirmBtn.disabled = true;
+            status.textContent = "Verification expired. Complete it again.";
+          },
+          "error-callback": function () {
+            if (!state.humanCheckCtx) return;
+            state.humanCheckCtx.token = "";
+            confirmBtn.disabled = true;
+            status.textContent = "Verification failed. Retry.";
+          }
+        });
+        state.humanCheckCtx.widgetId = id;
+      } catch (_) {
+        var closed = closeHumanModal("Turnstile failed to initialize.");
+        reject(new Error(closed.reason));
+      }
+    });
+  }
+
   async function runHumanCheck() {
     var challenge = await api("/challenge", { method: "POST", body: "{}" });
-    var answer = window.prompt("Human check: solve this before continuing.\n" + challenge.prompt, "");
-    if (answer === null) throw new Error("Cancelled.");
-    return {
-      challengeId: challenge.challengeId,
-      challengeAnswer: String(answer || "").trim()
-    };
+    if (!challenge.turnstileEnabled || !challenge.siteKey) {
+      throw new Error("Turnstile is not configured on this server.");
+    }
+    await ensureTurnstileScript();
+    return openHumanModal(challenge.siteKey);
   }
 
   function formatAgo(ts) {
@@ -225,6 +326,14 @@
       '    <div class="mp-row mp-custom-only"><label>Mutators</label><div id="mpMutatorGrid" class="mp-mut-grid"></div></div>',
       '    <div class="mp-modal-actions"><button class="menu-btn" id="mpCreateCancel" type="button">Cancel</button><button class="menu-btn primary" id="mpCreateSubmit" type="button">Create</button></div>',
       "  </div>",
+      "</div>",
+      '<div class="mp-modal" id="mpHumanModal">',
+      '  <div class="mp-modal-card">',
+      '    <div class="mp-title">Human Verification</div>',
+      '    <div class="mp-row"><div id="mpHumanStatus" class="mp-list-status">Complete verification to continue.</div></div>',
+      '    <div class="mp-row"><div id="mpTurnstileWidget"></div></div>',
+      '    <div class="mp-modal-actions"><button class="menu-btn" id="mpHumanCancel" type="button">Cancel</button><button class="menu-btn primary" id="mpHumanConfirm" type="button" disabled>Continue</button></div>',
+      "  </div>",
       "</div>"
     ].join("");
     document.body.insertAdjacentHTML("beforeend", html);
@@ -312,6 +421,7 @@
     stopListPolling();
     stopRoomPolling();
     closeCreateModal();
+    closeHumanModal();
     if (ui.screen) ui.screen.classList.remove("active");
     if (typeof window.showMenu === "function") window.showMenu();
     else if ($("menuScreen")) $("menuScreen").classList.add("active");
@@ -606,8 +716,7 @@
         roomId: roomId,
         name: name,
         sessionToken: existing || "",
-        challengeId: human.challengeId,
-        challengeAnswer: human.challengeAnswer
+        turnstileToken: human.turnstileToken
       })
     });
     setSession(roomId, data.sessionToken || "");
@@ -629,8 +738,7 @@
       maxPlayers: Number($("mpCreateMaxPlayers") ? $("mpCreateMaxPlayers").value : 6),
       wordLength: Number($("mpCreateWordLength") ? $("mpCreateWordLength").value : 0) || 0,
       mutators: mode === "custom" ? selectedMutators() : [],
-      challengeId: human.challengeId,
-      challengeAnswer: human.challengeAnswer
+      turnstileToken: human.turnstileToken
     };
     var data = await api("/create", { method: "POST", body: JSON.stringify(body) });
     closeCreateModal();
@@ -699,6 +807,28 @@
     if (ui.createModal) {
       ui.createModal.addEventListener("click", function (e) {
         if (e.target === ui.createModal) closeCreateModal();
+      });
+    }
+    if ($("mpHumanCancel")) {
+      $("mpHumanCancel").addEventListener("click", function () {
+        var closed = closeHumanModal("Cancelled.");
+        if (closed.ctx && closed.ctx.reject) closed.ctx.reject(new Error(closed.reason));
+      });
+    }
+    if ($("mpHumanConfirm")) {
+      $("mpHumanConfirm").addEventListener("click", function () {
+        var ctx = state.humanCheckCtx;
+        if (!ctx || !ctx.token) return;
+        var token = ctx.token;
+        closeHumanModal();
+        ctx.resolve({ turnstileToken: token });
+      });
+    }
+    if ($("mpHumanModal")) {
+      $("mpHumanModal").addEventListener("click", function (e) {
+        if (e.target !== $("mpHumanModal")) return;
+        var closed = closeHumanModal("Cancelled.");
+        if (closed.ctx && closed.ctx.reject) closed.ctx.reject(new Error(closed.reason));
       });
     }
 
