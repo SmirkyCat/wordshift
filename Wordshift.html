@@ -5067,10 +5067,10 @@ function runLoadWordReviewFromFile(opts){
   if(/^[A-Za-z]:[\\/]/.test(reqUrl)){
     reqUrl='file:///'+reqUrl.replace(/\\/g,'/');
   }
-  if(/\/\.netlify\/functions\/word-review(?:\?|$)/i.test(reqUrl)){
+  if(runWordReviewApiUrl(reqUrl)){
     reqUrl += (reqUrl.indexOf('?')>=0 ? '&' : '?') + '_ts=' + Date.now();
   }
-  var isRemoteApi=/\/\.netlify\/functions\/word-review(?:\?|$)/i.test(reqUrl) || /^https?:\/\/[^\s]+\/\.netlify\/functions\/word-review(?:\?|$)/i.test(reqUrl);
+  var isRemoteApi=runWordReviewApiUrl(reqUrl);
   if(isRemoteApi && !runWordReviewCanCallRemote({silent:opts.silent})){
     runWordReviewFileMeta={url:url,loaded:false,lastError:'Cloud API cooldown active'};
     return Promise.resolve(false);
@@ -6279,13 +6279,22 @@ var RUN_WORD_REVIEW_KEY='campaign_word_review_v1';
 var RUN_WORD_REVIEW_FILE_KEY='campaign_word_review_file_url';
 var RUN_WORD_REVIEW_WRITE_KEY='campaign_word_review_write_url';
 var RUN_WORD_REVIEW_AUTH_SESSION_KEY='campaign_word_review_auth_session_v1';
-var runWordReviewDefaultUrl=(location && location.protocol!=='file:') ? '/.netlify/functions/word-review' : 'campaign_words.json';
+var runWordReviewDefaultApiUrl='/api/word-review';
+var runWordReviewDefaultUrl=(location && location.protocol!=='file:') ? runWordReviewDefaultApiUrl : 'campaign_words.json';
 var runWordReviewFileUrl=String(load(RUN_WORD_REVIEW_FILE_KEY,runWordReviewDefaultUrl)||runWordReviewDefaultUrl);
 if((runWordReviewFileUrl||'').trim().toLowerCase()==='campaign_words.json' && location && location.protocol!=='file:'){
-  runWordReviewFileUrl='/.netlify/functions/word-review';
+  runWordReviewFileUrl=runWordReviewDefaultApiUrl;
   save(RUN_WORD_REVIEW_FILE_KEY, runWordReviewFileUrl);
 }
-var runWordReviewWriteUrl=String(load(RUN_WORD_REVIEW_WRITE_KEY,'/.netlify/functions/word-review')||'/.netlify/functions/word-review');
+var runWordReviewWriteUrl=String(load(RUN_WORD_REVIEW_WRITE_KEY,runWordReviewDefaultApiUrl)||runWordReviewDefaultApiUrl);
+if(location && location.protocol!=='file:' && /^\/\.netlify\/functions\/word-review(?:\?|$)/i.test(runWordReviewFileUrl)){
+  runWordReviewFileUrl=runWordReviewDefaultApiUrl;
+  save(RUN_WORD_REVIEW_FILE_KEY, runWordReviewFileUrl);
+}
+if(location && location.protocol!=='file:' && /^\/\.netlify\/functions\/word-review(?:\?|$)/i.test(runWordReviewWriteUrl)){
+  runWordReviewWriteUrl=runWordReviewDefaultApiUrl;
+  save(RUN_WORD_REVIEW_WRITE_KEY, runWordReviewWriteUrl);
+}
 function runReadWordReviewAuthKey(){
   try{
     return String((window.sessionStorage && sessionStorage.getItem(RUN_WORD_REVIEW_AUTH_SESSION_KEY)) || '').trim();
@@ -6394,11 +6403,16 @@ function runWordReviewSerialize(snapshot){
     rejected:Object.keys(snap.rejected).sort()
   }, null, 2) + '\n';
 }
+function runWordReviewApiUrl(url){
+  var u=String(url||'').trim();
+  if(!u) return false;
+  if(/^\/(?:\.netlify\/functions\/word-review|api\/word-review)(?:\?|$)/i.test(u)) return true;
+  return /^https?:\/\/[^\s]+\/(?:\.netlify\/functions\/word-review|api\/word-review)(?:\?|$)/i.test(u);
+}
 function runWordReviewRemoteWritable(){
   var u=String(runWordReviewWriteUrl||'').trim();
   if(!u) return false;
-  if(/^\/\.netlify\/functions\/word-review(?:\?|$)/i.test(u)) return true;
-  return /^https?:\/\/[^\s]+\/\.netlify\/functions\/word-review(?:\?|$)/i.test(u);
+  return runWordReviewApiUrl(u);
 }
 var runDarkReaderObserver=null;
 function runDetectDarkReaderEnabled(){
@@ -6762,7 +6776,7 @@ function runSetWordReviewFileUrl(url){
   runWordReviewNeedsInitialLoad=true;
   runWordReviewFileMeta.loaded=false;
   runWordReviewFileMeta.url='';
-  if(/\/\.netlify\/functions\/word-review(?:\?|$)/i.test(runWordReviewFileUrl)){
+  if(runWordReviewApiUrl(runWordReviewFileUrl)){
     runWordReviewWriteUrl=runWordReviewFileUrl;
     save(RUN_WORD_REVIEW_WRITE_KEY, runWordReviewWriteUrl);
   }

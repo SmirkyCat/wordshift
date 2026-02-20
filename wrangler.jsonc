@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "wordshift",
+  "pages_build_output_dir": ".",
+  "compatibility_date": "2026-02-20",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wordshift-db",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+    }
+  ]
+}

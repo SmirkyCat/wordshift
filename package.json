@@ -2,7 +2,14 @@
   "name": "wordshift-site",
   "version": "1.0.0",
   "private": true,
+  "scripts": {
+    "cf:dev": "wrangler pages dev .",
+    "cf:deploy": "wrangler pages deploy ."
+  },
   "dependencies": {
     "@netlify/blobs": "^8.2.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.56.0"
   }
 }

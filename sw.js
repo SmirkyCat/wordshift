@@ -8,7 +8,8 @@ const APP_SHELL = [
 ];
 
 function isDynamicApi(url) {
-  return url.pathname.startsWith('/.netlify/functions/');
+  if (url.pathname.startsWith('/.netlify/functions/')) return true;
+  return /^\/api\/word-review(?:\/|$)/.test(url.pathname);
 }
 
 function shouldCache(req, res) {
