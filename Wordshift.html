@@ -516,9 +516,14 @@ h1{font-size:1.05rem;letter-spacing:.12em;font-weight:800;margin:0}
 .campaign-progress{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   font-size:.85rem;letter-spacing:.2em;text-transform:uppercase;font-weight:800;
-  color:rgba(230,236,255,.85);pointer-events:none;display:none
+  color:rgba(230,236,255,.85);pointer-events:auto;display:none
 }
 body.mode-campaign .campaign-progress{display:block}
+.campaign-progress.approved-word{
+  color:#ffd76d;
+  text-shadow:0 0 12px rgba(255,215,109,.45);
+  cursor:help;
+}
 .controls{display:flex;gap:8px;align-items:center}
 button.icon{background:linear-gradient(135deg,rgba(255,255,255,.06),rgba(255,255,255,.02)) transparent;border:1.5px solid rgba(255,255,255,.18);color:var(--fg);
   border-radius:14px;padding:10px;font-size:18px;line-height:0;cursor:pointer;
@@ -4977,9 +4982,11 @@ function runRenderWordReview(forceNext){
   runEnsureWordReviewBatch(5);
   var stats=runWordReviewStats();
   if(wrStatsEl){
-    var fileState=runWordReviewFileMeta.loaded
-      ? ('File: '+runWordReviewFileMeta.url)
-      : ('File not loaded: '+(runWordReviewFileMeta.lastError || runWordReviewFileUrl || 'unset'));
+    var fileState=runWordReviewLoading
+      ? ('Loading file: '+runWordReviewFileUrl)
+      : (runWordReviewFileMeta.loaded
+        ? ('File: '+runWordReviewFileMeta.url)
+        : ('File not loaded: '+(runWordReviewFileMeta.lastError || runWordReviewFileUrl || 'unset')));
     var rows=stats.lengths.map(function(row){
       var leftToApprove=Math.max(0, row.total-row.approved);
       return '<div class="wr-line">'
@@ -4996,6 +5003,10 @@ function runRenderWordReview(forceNext){
       + '<div class="wr-lines">'+rows+'</div>';
   }
   if(!wrListEl) return;
+  if(runWordReviewLoading){
+    wrListEl.innerHTML='<div class="word-review-empty">Loading campaign word file...</div>';
+    return;
+  }
   if(!runWordReviewBatch.length){
     wrListEl.innerHTML='<div class="word-review-empty">All currently available campaign words are reviewed.</div>';
     return;
@@ -5021,10 +5032,29 @@ function openWordReviewModal(){
   if(!wordReviewModal) return;
   runUpdateWordReviewControls();
   runWordReviewBatch=[];
-  runRenderWordReview(true);
   wordReviewModal.classList.add('open');
   document.body.style.overflow='hidden';
-  runLoadWordReviewFromFile({silent:true}).then(function(){ runRenderWordReview(true); });
+
+  runWordReviewLoading=true;
+  runRenderWordReview(true);
+
+  var expectedUrl=String(runWordReviewFileUrl||'').trim();
+  var needLoad=runWordReviewNeedsInitialLoad || !runWordReviewFileMeta.loaded || runWordReviewFileMeta.url!==expectedUrl;
+  if(!needLoad){
+    runWordReviewLoading=false;
+    runRenderWordReview(true);
+  }else{
+    runLoadWordReviewFromFile({silent:true, force:true}).then(function(ok){
+      runWordReviewLoading=false;
+      if(ok){
+        runWordReviewNeedsInitialLoad=false;
+      }else{
+        toast('Word review file load failed. Reload file before approving.');
+      }
+      runRenderWordReview(true);
+    });
+  }
+
   setTimeout(downloadDict,40);
 }
 function closeWordReviewModal(){
@@ -5204,6 +5234,8 @@ var wrReloadBtn=$('#wrReload');
 var wrBindFileBtn=$('#wrBindFile');
 var wrSaveFileBtn=$('#wrSaveFile');
 var runWordReviewBatch=[];
+var runWordReviewLoading=false;
+var runWordReviewNeedsInitialLoad=true;
 var runWordReviewFileHandle=null;
 var runWordReviewFileSync={lastOk:0,lastError:'',lastTarget:''};
 var started=false;
@@ -5507,6 +5539,18 @@ async function runSaveWordReviewToRemote(opts){
   var url=String(runWordReviewWriteUrl||'').trim();
   if(!runWordReviewRemoteWritable()){
     if(!opts.silent) toast('Cloud API not configured. Expected '+runWordReviewWriteUrl);
+    return false;
+  }
+  var baselineLoaded=false;
+  try{
+    baselineLoaded=await runLoadWordReviewFromFile({silent:true, force:true, url:url});
+  }catch(_){
+    baselineLoaded=false;
+  }
+  if(!baselineLoaded){
+    runWordReviewFileSync.lastError=runWordReviewFileMeta.lastError || ('baseline load failed at '+url);
+    if(!opts.silent) toast('Cloud save blocked until reload succeeds.');
+    runRenderWordReview(false);
     return false;
   }
   try{
@@ -6107,7 +6151,12 @@ function runPickWord(len, opts){
     else if(runCampaign.wordSource!=='remote') runCampaign.wordSource='fallback';
   }
   var fresh=pool.filter(function(w){ return !runCampaign.usedWords[w]; });
+  var freshApproved=fresh.filter(function(w){ return !!runWordReview.approved[w]; });
   var src=fresh.length?fresh:pool;
+  if(freshApproved.length){
+    // Prefer approved reviewed words first when available.
+    src=freshApproved;
+  }
   var pick=src[(runRandom()*src.length)|0];
   runCampaign.usedWords[pick]=true;
   return pick;
@@ -7435,7 +7484,7 @@ function beginCampaignWord(set, index){
   var entry=wordEntry(set, index);
   var w=lettersOnlyUpper(entry.word);
   if(!w) return;
-  activeCampaign={setId:set.id, index:index, nodeId:set.nodeId || runNodeFromSetId(set.id)};
+  activeCampaign={setId:set.id, index:index, nodeId:set.nodeId || runNodeFromSetId(set.id), wordApproved:!!runWordReview.approved[w]};
   runCampaign.activeNodeId=activeCampaign.nodeId || null;
   runSave();
   state.mode='campaign';
@@ -7565,7 +7614,10 @@ function startCampaign(nodeId){
     save('lastVisit', Date.now());
     setTimeout(downloadDict,50);
     if(savedSession && savedSession.campaignId===set.id && typeof savedSession.campaignIndex==='number' && !savedSession.gameOver){
-      activeCampaign={setId:set.id, index:clamp(savedSession.campaignIndex,0,(set.words||[]).length-1), nodeId:node.id};
+      var resumeIdx=clamp(savedSession.campaignIndex,0,(set.words||[]).length-1);
+      var resumeEntry=wordEntry(set, resumeIdx);
+      var resumeWord=lettersOnlyUpper(resumeEntry.word || '');
+      activeCampaign={setId:set.id, index:resumeIdx, nodeId:node.id, wordApproved:!!(resumeWord && runWordReview.approved[resumeWord])};
       runCampaign.activeNodeId=node.id;
       runSave();
       state.campaignMutators=normalizeMutators(set.mutators || savedSession.campaignMutators || null);
@@ -7593,10 +7645,22 @@ function startCampaign(nodeId){
 function updateCampaignProgress(){
   var el=$('#campaignProgress');
   if(!el) return;
-  if(state.mode!=='campaign' || !activeCampaign){ el.textContent=''; return; }
+  if(state.mode!=='campaign' || !activeCampaign){
+    el.textContent='';
+    el.classList.remove('approved-word');
+    el.removeAttribute('title');
+    el.removeAttribute('aria-label');
+    return;
+  }
   ensureRunCampaign();
   var node=runResolveNodeForSet(getCampaignSet(activeCampaign.setId));
-  if(!node){ el.textContent=''; return; }
+  if(!node){
+    el.textContent='';
+    el.classList.remove('approved-word');
+    el.removeAttribute('title');
+    el.removeAttribute('aria-label');
+    return;
+  }
   var seg='Cluster '+runCampaign.cluster+' ';
   if(node.type==='boss'){ seg += ' - Boss'; }
   else if(node.type==='elite'){ seg += ' - Elite '+Math.max(1,node.packStage||1)+'/'+RUN_CLUSTER_DEPTH; }
@@ -7605,6 +7669,24 @@ function updateCampaignProgress(){
   var total=set && set.words ? set.words.length : 0;
   var idx=(typeof activeCampaign.index==='number') ? (activeCampaign.index+1) : 0;
   if(total>0){ seg += ' | Level '+idx+'/'+total; }
+
+  var currentEntry=wordEntry(set, Math.max(0, safeInt(activeCampaign.index,0)));
+  var currentWord=lettersOnlyUpper((currentEntry && currentEntry.word) || '');
+  var approvedCurrent=!!(currentWord && runWordReview.approved[currentWord]);
+  activeCampaign.wordApproved=approvedCurrent;
+
+  if(approvedCurrent){
+    seg += ' \u2605';
+    el.classList.add('approved-word');
+    var tip='\u2605 Approved pick: this target came from your approved campaign word list and approved words are prioritized.';
+    el.title=tip;
+    el.setAttribute('aria-label', tip);
+  }else{
+    el.classList.remove('approved-word');
+    el.removeAttribute('title');
+    el.removeAttribute('aria-label');
+  }
+
   el.textContent=seg;
 }
 
@@ -7814,8 +7896,12 @@ if(optWordReviewReload){
   optWordReviewReload.addEventListener('click', function(){
     var nextUrl=optWordReviewUrl ? optWordReviewUrl.value : runWordReviewFileUrl;
     runSetWordReviewFileUrl(nextUrl);
-    runLoadWordReviewFromFile({silent:false, force:true}).then(function(){
-      runRenderWordReview(true);
+    runWordReviewLoading=true;
+    if(wordReviewModal && wordReviewModal.classList.contains('open')) runRenderWordReview(false);
+    runLoadWordReviewFromFile({silent:false, force:true}).then(function(ok){
+      runWordReviewLoading=false;
+      if(ok) runWordReviewNeedsInitialLoad=false;
+      if(wordReviewModal && wordReviewModal.classList.contains('open')) runRenderWordReview(true);
     });
   });
 }
@@ -7861,6 +7947,18 @@ if(wrListEl){
   wrListEl.addEventListener('click', function(e){
     var btn=(e.target.closest && e.target.closest('button[data-wr-action]')) ? e.target.closest('button[data-wr-action]') : null;
     if(!btn) return;
+
+    if(runWordReviewLoading){
+      toast('Word review file is still loading.');
+      return;
+    }
+
+    var expectedUrl=String(runWordReviewFileUrl||'').trim();
+    if(!runWordReviewFileMeta.loaded || runWordReviewFileMeta.url!==expectedUrl){
+      toast('Reload file first so approvals use cloud baseline.');
+      return;
+    }
+
     var action=btn.getAttribute('data-wr-action');
     var word=lettersOnlyUpper(btn.getAttribute('data-word') || '');
     if(!word) return;
@@ -7871,7 +7969,7 @@ if(wrListEl){
 }
 if(wrBindFileBtn){ wrBindFileBtn.addEventListener('click', function(){ runBindWordReviewFile(); }); }
 if(wrSaveFileBtn){ wrSaveFileBtn.addEventListener('click', function(){ var useRemote=runWordReviewRemoteWritable(); runSaveWordReviewToFile({silent:useRemote}).then(function(ok){ if(ok) return; return runSaveWordReviewToRemote({silent:false}); }); }); }
-if(wrReloadBtn){ wrReloadBtn.addEventListener('click', function(){ runLoadWordReviewFromFile({silent:false, force:true}).then(function(){ runRenderWordReview(true); }); }); }
+if(wrReloadBtn){ wrReloadBtn.addEventListener('click', function(){ runWordReviewLoading=true; runRenderWordReview(false); runLoadWordReviewFromFile({silent:false, force:true}).then(function(ok){ runWordReviewLoading=false; if(ok) runWordReviewNeedsInitialLoad=false; runRenderWordReview(true); }); }); }
 if(wordReviewModal){
   wordReviewModal.addEventListener('click', function(e){
     if(e.target===wordReviewModal) closeWordReviewModal();
